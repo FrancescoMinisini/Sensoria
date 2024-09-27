@@ -2,10 +2,10 @@ import sys
 import cv2
 import numpy as np
 import pandas as pd
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QEvent
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                              QSplitter, QPushButton, QCheckBox, QSizePolicy, QApplication)
-from PyQt5.QtGui import QPixmap, QImage, QIcon
+from PyQt5.QtGui import QPixmap, QImage, QIcon, QCursor
 import pyqtgraph as pg
 
 
@@ -23,6 +23,10 @@ class BaseVideoPlayer(QMainWindow):
 
         # Initialize synchronization offset
         self.sync_offset = 0.0  # In seconds
+
+        # Synchronization state
+        self.is_syncing_video = False
+        self.is_syncing_data = False
 
         # Central widget and layout
         self.central_widget = QWidget(self)
@@ -57,12 +61,14 @@ class BaseVideoPlayer(QMainWindow):
         self.play_button.clicked.connect(self.toggle_playback)
         self.control_layout.addWidget(self.play_button)
 
-        # Sync buttons
+        # Sync buttons with tooltips
         self.sync_video_button = QPushButton("Set Sync Point (Video)")
+        self.sync_video_button.setToolTip("Click to set or cancel the synchronization point in the video at the current frame.")
         self.sync_video_button.clicked.connect(self.set_sync_point_video)
         self.control_layout.addWidget(self.sync_video_button)
 
         self.sync_data_button = QPushButton("Set Sync Point (Data)")
+        self.sync_data_button.setToolTip("Click to set or cancel synchronization mode, then select a point on the graph to sync.")
         self.sync_data_button.clicked.connect(self.set_sync_point_data)
         self.control_layout.addWidget(self.sync_data_button)
 
@@ -79,6 +85,13 @@ class BaseVideoPlayer(QMainWindow):
         self.trackbar.sliderReleased.connect(self.seek_video)
         self.trackbar.sliderMoved.connect(self.handle_slider_move)
         self.controls_and_graphs_layout.addWidget(self.trackbar)
+
+        # Synchronization status label
+        self.sync_status_label = QLabel("", self)
+        self.sync_status_label.setAlignment(Qt.AlignCenter)
+        self.sync_status_label.setStyleSheet("color: #FFD700; font-size: 14px; font-weight: bold;")
+        self.sync_status_label.hide()  # Hidden by default
+        self.controls_and_graphs_layout.addWidget(self.sync_status_label)
 
         # Load video
         self.video_path = video_filePath
@@ -146,9 +159,6 @@ class BaseVideoPlayer(QMainWindow):
         # Initialize plot widget for selected columns
         self.selected_columns = []
 
-        # Command info overlay
-        self.setup_command_overlay()
-
         # Add video label and controls to the main layout
         self.main_splitter = QSplitter(Qt.Horizontal, self.central_widget)
         self.main_splitter.addWidget(self.video_label)
@@ -184,37 +194,6 @@ class BaseVideoPlayer(QMainWindow):
             }
         """
 
-    def setup_command_overlay(self):
-        # Metodo per configurare il pannello di comandi
-        self.command_overlay = QWidget(self)
-        self.command_overlay.setGeometry(10, 10, 150, 90)
-        self.command_overlay.setStyleSheet("""
-            background-color: #2E2E2E;
-            border: 1px solid #F0F0F0;
-            border-radius: 8px;
-            padding: 3px;
-        """)
-        command_layout = QVBoxLayout(self.command_overlay)
-        command_layout.setSpacing(2)
-
-        command_info_label = QLabel()
-        command_info_label.setPixmap(QPixmap("right_arrow.png"))
-        command_info_label.setText(" Right: Next Frame")
-        command_info_label.setStyleSheet("color: #F0F0F0; font-size: 12px;")
-        command_layout.addWidget(command_info_label)
-
-        command_info_label = QLabel()
-        command_info_label.setPixmap(QPixmap("left_arrow.png"))
-        command_info_label.setText(" Left: Prev Frame")
-        command_info_label.setStyleSheet("color: #F0F0F0; font-size: 12px;")
-        command_layout.addWidget(command_info_label)
-
-        command_info_label = QLabel()
-        command_info_label.setPixmap(QPixmap("spacebar.png"))
-        command_info_label.setText(" Space: Play/Pause")
-        command_info_label.setStyleSheet("color: #F0F0F0; font-size: 12px;")
-        command_layout.addWidget(command_info_label)
-
     def show_first_frame(self):
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         ret, frame = self.cap.read()
@@ -224,6 +203,9 @@ class BaseVideoPlayer(QMainWindow):
             self.update_graphs()
 
     def toggle_playback(self):
+        if self.is_syncing_video or self.is_syncing_data:
+            return  # Do not allow playback during synchronization
+
         if self.video_finished:
             self.restart_video()
         if self.is_playing:
@@ -237,7 +219,7 @@ class BaseVideoPlayer(QMainWindow):
         self.is_playing = not self.is_playing
 
     def next_frame(self):
-        if not any(self.interactive_flags):
+        if not any(self.interactive_flags) and not self.is_syncing_data and not self.is_syncing_video:
             ret, frame = self.cap.read()
             if ret:
                 self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
@@ -252,6 +234,9 @@ class BaseVideoPlayer(QMainWindow):
                 self.video_finished = True
 
     def seek_video(self):
+        if self.is_syncing_video or self.is_syncing_data:
+            return  # Do not allow seeking during synchronization
+
         self.timer.stop()
         self.is_playing = False
         self.play_button.setText("Play")
@@ -265,6 +250,9 @@ class BaseVideoPlayer(QMainWindow):
         self.video_finished = False
 
     def handle_slider_move(self, position):
+        if self.is_syncing_video or self.is_syncing_data:
+            return  # Do not allow seeking during synchronization
+
         self.current_frame = position
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         ret, frame = self.cap.read()
@@ -284,6 +272,9 @@ class BaseVideoPlayer(QMainWindow):
         self.frame_counter.setText(f"Frame: {self.current_frame}/{self.total_frames}")
 
     def keyPressEvent(self, event):
+        if self.is_syncing_video or self.is_syncing_data:
+            return  # Do not allow key events during synchronization
+
         if event.key() == Qt.Key_Right or event.key() == Qt.Key_Up:
             self.step_frame(1)
         elif event.key() == Qt.Key_Left or event.key() == Qt.Key_Down:
@@ -292,6 +283,9 @@ class BaseVideoPlayer(QMainWindow):
             self.toggle_playback()
 
     def step_frame(self, step):
+        if self.is_syncing_video or self.is_syncing_data:
+            return  # Do not allow frame stepping during synchronization
+
         self.timer.stop()
         self.is_playing = False
         self.play_button.setText("Play")
@@ -309,6 +303,9 @@ class BaseVideoPlayer(QMainWindow):
         self.video_finished = False
 
     def restart_video(self):
+        if self.is_syncing_video or self.is_syncing_data:
+            return  # Do not allow restarting during synchronization
+
         self.current_frame = 0
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         ret, frame = self.cap.read()
@@ -330,7 +327,8 @@ class BaseVideoPlayer(QMainWindow):
 
         for i, (plot_widget, moving_points, columns, data) in enumerate(self.plot_widgets):
             # Trova l'indice più vicino al timestamp sincronizzato
-            closest_index = np.abs(data['VideoTime'] - synced_time).idxmin()
+            synced_time_clipped = max(data['VideoTime'].min(), min(data['VideoTime'].max(), synced_time))
+            closest_index = np.abs(data['VideoTime'] - synced_time_clipped).idxmin()
 
             x = data['VideoTime'].values[closest_index]
             for j, column in enumerate(columns):
@@ -402,11 +400,18 @@ class BaseVideoPlayer(QMainWindow):
 
     @pyqtSlot(object)
     def on_mouse_moved(self, pos, widget, idx):
+        if self.is_syncing_data or self.is_syncing_video:
+            return  # Avoid interference during synchronization
+
         vb = widget.plotItem.vb
         mouse_point = vb.mapSceneToView(pos)
-        data = self.plot_widgets[idx][-1]  # Recupera i dati associati al grafico
-        closest_index = np.abs(data['VideoTime'] - mouse_point.x()).idxmin()
-        self.current_frame = closest_index
+        data = self.plot_widgets[idx][-1]  # Retrieve associated data
+        # Add synchronization offset
+        synced_time = mouse_point.x() + self.sync_offset
+        # Find corresponding video frame
+        synced_time_clipped = max(0, min(self.video_timestamps[-1], synced_time))
+        closest_frame = np.abs(self.video_timestamps - synced_time_clipped).argmin()
+        self.current_frame = closest_frame
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         ret, frame = self.cap.read()
         if ret:
@@ -417,9 +422,15 @@ class BaseVideoPlayer(QMainWindow):
     def stop_interactivity(self, widget, idx):
         self.interactive_flags[idx] = False
         widget.setMouseTracking(False)
-        widget.scene().sigMouseMoved.disconnect()
+        try:
+            widget.scene().sigMouseMoved.disconnect()
+        except TypeError:
+            pass  # Already disconnected
 
     def toggle_interactivity(self, event, widget, idx):
+        if self.is_syncing_data or self.is_syncing_video:
+            return  # Avoid interference during synchronization
+
         if not self.interactive_flags[idx]:
             self.interactive_flags[idx] = True
             widget.setMouseTracking(True)
@@ -436,27 +447,52 @@ class BaseVideoPlayer(QMainWindow):
         self.data_left = pd.read_csv(csv_filePath_left, skiprows=18)
 
         for data in [self.data_right, self.data_left]:
-            # Converti Timestamp in datetime
+            # Convert 'Timestamp' to datetime
             data['Timestamp'] = pd.to_datetime(data['Timestamp'], format='%H:%M:%S.%f', errors='coerce')
             data.dropna(subset=['Timestamp'], inplace=True)
             data['Timestamp'] = (data['Timestamp'] - data['Timestamp'].iloc[0]).dt.total_seconds()
             data.sort_values('Timestamp', inplace=True)
             data.reset_index(drop=True, inplace=True)
 
-            # Crea 'VideoTime' inizialmente uguale a 'Timestamp'
+            # Create 'VideoTime' initially equal to 'Timestamp'
             data['VideoTime'] = data['Timestamp']
 
-        # Gestione dei valori mancanti
+        # Handle missing values
         self.data_right.interpolate(method='linear', inplace=True)
         self.data_left.interpolate(method='linear', inplace=True)
 
     def set_sync_point_video(self):
-        # Salva il timestamp corrente del video come punto di sincronizzazione
+        if self.is_syncing_video:
+            # Cancel synchronization mode
+            self.is_syncing_video = False
+            self.sync_status_label.hide()
+            self.sync_video_button.setText("Set Sync Point (Video)")
+            return
+
+        # Enter synchronization mode
+        self.is_syncing_video = True
+        self.sync_status_label.setText("Synchronization: Video sync point set at current frame.\nNow, click 'Set Sync Point (Data)' and select the corresponding point on the graph.")
+        self.sync_status_label.show()
+        self.sync_video_button.setText("Cancel Sync (Video)")
+        # Capture current video time
         self.sync_video_time = self.video_timestamps[self.current_frame]
-        self.check_sync_ready()
 
     def set_sync_point_data(self):
-        # Attiva la modalità di selezione del punto sul grafico
+        if self.is_syncing_data:
+            # Cancel synchronization mode
+            self.is_syncing_data = False
+            self.sync_status_label.hide()
+            self.sync_data_button.setText("Set Sync Point (Data)")
+            QApplication.restoreOverrideCursor()
+            return
+
+        # Enter synchronization mode
+        self.is_syncing_data = True
+        self.sync_status_label.setText("Synchronization: Click on the graph to set data sync point.\nClick 'Set Sync Point (Data)' again to cancel.")
+        self.sync_status_label.show()
+        self.sync_data_button.setText("Cancel Sync (Data)")
+        QApplication.setOverrideCursor(QCursor(Qt.CrossCursor))
+
         for idx, (plot_widget, _, _, _) in enumerate(self.plot_widgets):
             self.interactive_flags[idx] = True
             plot_widget.setMouseTracking(True)
@@ -465,25 +501,37 @@ class BaseVideoPlayer(QMainWindow):
             )
 
     def on_sync_data_point_selected(self, event, widget, idx):
+        if not self.is_syncing_data:
+            return
+
         pos = event.scenePos()
         vb = widget.plotItem.vb
         mouse_point = vb.mapSceneToView(pos)
         data = self.plot_widgets[idx][-1]
-        # Trova l'indice più vicino al punto cliccato
+        # Find the index closest to the clicked point
         closest_index = np.abs(data['VideoTime'] - mouse_point.x()).idxmin()
         self.sync_data_time = data['VideoTime'].values[closest_index]
 
-        # Disabilita l'interattività
+        # Disable interactivity
         self.stop_interactivity(widget, idx)
+        QApplication.restoreOverrideCursor()
+        self.is_syncing_data = False
+        self.sync_data_button.setText("Set Sync Point (Data)")
+
         self.check_sync_ready()
 
     def check_sync_ready(self):
-        # Se entrambi i punti di sincronizzazione sono stati selezionati, calcola l'offset
+        # If both sync points are set, calculate the offset
         if self.sync_video_time is not None and self.sync_data_time is not None:
             self.sync_offset = self.sync_video_time - self.sync_data_time
             print(f"Synchronization offset set to {self.sync_offset} seconds")
-            # Aggiorna i grafici per riflettere la nuova sincronizzazione
+            # Update graphs to reflect new synchronization
             self.update_graphs()
+            # Reset sync points
+            self.sync_video_time = None
+            self.sync_data_time = None
+            self.sync_status_label.hide()
+            self.sync_video_button.setText("Set Sync Point (Video)")
 
     @staticmethod
     def extract_sensor_rate(csv_filePath):
