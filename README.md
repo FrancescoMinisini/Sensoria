@@ -87,7 +87,7 @@ python main.py
 
 ## Contatti
 
-Per domande o assistenza, contatta [il tuo nome] a [tuo.email@example.com].
+Per domande o assistenza, contatta Francesco Giuseppe Minisini a fg.minisini@gmail.com
 ```
 
 Assicurati di aggiungere il file `requirements.txt` e di sostituire l'URL del repository e i dettagli di contatto con i tuoi dati.
