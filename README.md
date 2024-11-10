@@ -1,6 +1,5 @@
 Ecco il file `README.md` completo, scritto interamente in Markdown:
 
-```markdown
 # Video Player with Interactive Graphs
 
 Questa applicazione è un video player avanzato con grafici interattivi che permette di visualizzare dati sincronizzati da sensori insieme al video, con funzionalità aggiuntive per il controllo della riproduzione e l'analisi dei dati.
