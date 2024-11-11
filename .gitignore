@@ -1,0 +1,12 @@
+# Ignore data directory
+data/
+
+# Ignore Python cache directories
+__pycache__/
+
+# Ignore distribution directories
+dist/
+build/
+
+# Ignore main.spec file
+main.spec

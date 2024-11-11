@@ -1,6 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication
-from Models.BaseVideoPlayer import BaseVideoPlayer
+from BaseVideoPlayer import BaseVideoPlayer
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

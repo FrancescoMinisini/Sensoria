@@ -7,171 +7,180 @@ import json
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                              QSplitter, QPushButton, QCheckBox, QSizePolicy, QApplication,
-                             QAction, QFileDialog, QMessageBox, QMenu, QComboBox, QDialog, QDialogButtonBox)
+                             QAction, QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox)
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QCursor
 import pyqtgraph as pg
-
+from platformdirs import user_data_dir, user_cache_dir
 
 class BaseVideoPlayer(QMainWindow):
     def __init__(self, video_filePath=None, csv_filePath_right=None, csv_filePath_left=None):
         super().__init__()
 
-        # Inizializza la finestra principale
+        # Initialize main window
         self.setWindowTitle("Video Player with Interactive Graphs")
         self.setGeometry(100, 100, 1200, 900)
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # Imposta l'icona dell'applicazione
-        self.setWindowIcon(QIcon('app_icon.png'))  # Assicurati che 'app_icon.png' esista
+        # Set application icon
+        self.setWindowIcon(QIcon('app_icon.png'))  # Ensure 'app_icon.png' exists
 
-        # Variabile per il tema (scuro di default)
+        # Theme variable (dark by default)
         self.theme = 'dark'
 
-        # Variabile per la velocità di riproduzione
+        # Playback speed variable
         self.playback_speed = 1.0
 
-        # Variabile per le impostazioni salvate
+        # Configurations
         self.config = {}
 
-        # Widget centrale e layout
+        # Application data directory
+        self.app_name = 'YourAppName'  # Replace with your app name
+        self.app_data_dir = user_data_dir(self.app_name)
+        self.app_cache_dir = user_cache_dir(self.app_name)
+
+        # Ensure the data directories exist
+        os.makedirs(self.app_data_dir, exist_ok=True)
+        os.makedirs(self.app_cache_dir, exist_ok=True)
+
+        # Central widget and layout
         self.central_widget = QWidget(self)
         self.setCentralWidget(self.central_widget)
 
-        # Inizializza i componenti UI
+        # Initialize UI components
         self.setup_ui()
 
-        # Applica il tema all'applicazione
+        # Apply theme to the application
         self.apply_theme()
 
-        # Variabili per la sincronizzazione
-        self.sync_offset = 0.0  # In secondi
-        self.sync_state = None  # Può essere None, "video", o "data"
+        # Variables for synchronization
+        self.sync_offset = 0.0  # In seconds
+        self.sync_state = None  # Can be None, "video", or "data"
 
-        # Carica l'ultima cartella aperta
+        # Load the last opened folder
         self.load_last_folder()
 
-        # Se i percorsi del video e dei CSV sono forniti, caricali
+        # If video and CSV paths are provided, load them
         if video_filePath and csv_filePath_right and csv_filePath_left:
             self.load_video_and_data(video_filePath, [csv_filePath_right, csv_filePath_left])
 
     def setup_ui(self):
-        # Crea la barra dei menu
+        # Create menu bar
         self.menu_bar = self.menuBar()
 
-        # Menu File
+        # File menu
         self.file_menu = self.menu_bar.addMenu('File')
 
-        # Azione Apri
+        # Open action
         open_action = QAction('Apri', self)
         open_action.triggered.connect(self.open_files)
         self.file_menu.addAction(open_action)
 
-        # Azione per scambiare i file CSV
+        # Switch CSV files action
         switch_csv_action = QAction('Scambia File CSV', self)
         switch_csv_action.triggered.connect(self.switch_csv_files)
         self.file_menu.addAction(switch_csv_action)
 
-        # Menu Opzioni
+        # Options menu
         self.options_menu = self.menu_bar.addMenu('Opzioni')
 
-        # Azione per reimpostare la sincronizzazione
+        # Reset synchronization action
         reset_sync_action = QAction('Reimposta Sincronizzazione', self)
         reset_sync_action.triggered.connect(self.reset_synchronization)
         self.options_menu.addAction(reset_sync_action)
 
-        # Azione per reimpostare le impostazioni predefinite
+        # Reset settings action
         reset_settings_action = QAction('Reimposta Impostazioni Predefinite', self)
         reset_settings_action.triggered.connect(self.reset_settings)
         self.options_menu.addAction(reset_settings_action)
 
-        # Azione per cambiare il tema
+        # Toggle theme action
         toggle_theme_action = QAction('Tema Scuro/Chiaro', self)
         toggle_theme_action.triggered.connect(self.toggle_theme)
         self.options_menu.addAction(toggle_theme_action)
 
-        # Layout centrale
+        # Central layout
         self.central_layout = QHBoxLayout(self.central_widget)
         self.central_widget.setLayout(self.central_layout)
         self.central_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Trackbar verticale
+        # Vertical trackbar
         self.trackbar = QSlider(Qt.Vertical, self)
-        self.trackbar.setRange(0, 100)  # Intervallo temporaneo fino al caricamento del video
+        self.trackbar.setRange(0, 100)  # Temporary range until video is loaded
         self.trackbar.sliderReleased.connect(self.seek_video)
         self.trackbar.sliderMoved.connect(self.handle_slider_move)
         self.central_layout.addWidget(self.trackbar)
 
-        # Layout per video e grafici
+        # Layout for video and graphs
         self.video_graphs_layout = QVBoxLayout()
         self.central_layout.addLayout(self.video_graphs_layout)
 
-        # Etichetta per la visualizzazione del video
+        # Label for video display
         self.video_label = QLabel(self)
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_graphs_layout.addWidget(self.video_label)
 
-        # Messaggio per aprire una cartella
+        # Message to open a folder
         self.open_folder_label = QLabel("Per favore, apri una cartella per iniziare", self)
         self.open_folder_label.setAlignment(Qt.AlignCenter)
         self.open_folder_label.setStyleSheet("color: #F0F0F0; font-size: 16px; font-weight: bold;")
         self.video_graphs_layout.addWidget(self.open_folder_label)
 
-        # Pannello di controllo
+        # Control panel
         self.control_panel = QWidget(self)
         self.control_layout = QHBoxLayout(self.control_panel)
         self.control_panel.setLayout(self.control_layout)
         self.video_graphs_layout.addWidget(self.control_panel)
 
-        # Pulsante Play
+        # Play button
         self.play_button = QPushButton("Play")
         self.play_button.setIcon(QIcon("play.png"))
         self.play_button.clicked.connect(self.toggle_playback)
         self.control_layout.addWidget(self.play_button)
 
-        # Selettore di velocità
+        # Speed selector
         self.speed_selector = QComboBox(self)
         self.speed_selector.addItems(["0.25x", "0.5x", "1x", "1.5x", "2x"])
         self.speed_selector.setCurrentText("1x")
         self.speed_selector.currentTextChanged.connect(self.change_playback_speed)
         self.control_layout.addWidget(self.speed_selector)
 
-        # Pulsante di sincronizzazione con tooltip
+        # Synchronization button with tooltip
         self.sync_button = QPushButton("Sincronizza")
         self.sync_button.setToolTip("Clicca per avviare il processo di sincronizzazione.")
         self.sync_button.clicked.connect(self.toggle_synchronization)
         self.control_layout.addWidget(self.sync_button)
 
-        # Pulsante per impostare il punto di sincronizzazione nel video (visibile solo durante la sincronizzazione)
+        # Set sync point button (visible only during synchronization)
         self.set_sync_point_button = QPushButton("Imposta Punto di Sync")
         self.set_sync_point_button.setToolTip("Clicca per impostare il punto di sincronizzazione al frame video corrente.")
         self.set_sync_point_button.clicked.connect(self.set_sync_point_video)
-        self.set_sync_point_button.hide()  # Nascosto di default
+        self.set_sync_point_button.hide()  # Hidden by default
         self.control_layout.addWidget(self.set_sync_point_button)
 
         # Spacer
         self.control_layout.addStretch()
 
-        # Contatore dei frame
+        # Frame counter
         self.frame_counter = QLabel(f"Frame: 0/0", self)
         self.frame_counter.setObjectName("FrameCounter")
         self.control_layout.addWidget(self.frame_counter)
 
-        # Etichetta di stato della sincronizzazione
+        # Synchronization status label
         self.sync_status_label = QLabel("", self)
         self.sync_status_label.setAlignment(Qt.AlignCenter)
         self.sync_status_label.setStyleSheet("color: #FFD700; font-size: 14px; font-weight: bold;")
-        self.sync_status_label.hide()  # Nascosto di default
+        self.sync_status_label.hide()  # Hidden by default
         self.video_graphs_layout.addWidget(self.sync_status_label)
 
-        # Contenitore per controlli e grafici
+        # Container for controls and graphs
         self.controls_and_graphs_container = QWidget(self)
         self.controls_and_graphs_layout = QVBoxLayout(self.controls_and_graphs_container)
         self.controls_and_graphs_container.setLayout(self.controls_and_graphs_layout)
         self.controls_and_graphs_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_graphs_layout.addWidget(self.controls_and_graphs_container)
 
-        # Layout per il piede destro
+        # Layout for the right foot
         right_foot_layout = QHBoxLayout()
         self.right_label = QLabel("Piede Destro")
         self.right_label.setStyleSheet("font-weight: bold;")
@@ -187,7 +196,7 @@ class BaseVideoPlayer(QMainWindow):
 
         self.controls_and_graphs_layout.addLayout(right_foot_layout)
 
-        # Layout per il piede sinistro
+        # Layout for the left foot
         left_foot_layout = QHBoxLayout()
         self.left_label = QLabel("Piede Sinistro")
         self.left_label.setStyleSheet("font-weight: bold;")
@@ -203,19 +212,19 @@ class BaseVideoPlayer(QMainWindow):
 
         self.controls_and_graphs_layout.addLayout(left_foot_layout)
 
-        # Splitter verticale per i grafici
+        # Vertical splitter for graphs
         self.graph_splitter = QSplitter(Qt.Vertical, self)
         self.graph_splitter.setHandleWidth(8)
         self.controls_and_graphs_layout.addWidget(self.graph_splitter)
 
-        # Contenitore per i widget di plotting
+        # Container for plotting widgets
         self.plot_widgets = []
-        self.interactive_flags = []  # Per tracciare quali grafici sono interattivi
+        self.interactive_flags = []  # To track which graphs are interactive
 
-        # Inizializza i widget di plotting per le colonne selezionate
+        # Initialize plotting widgets for selected columns
         self.selected_columns = []
 
-        # Applica il tema alle etichette dei piedi
+        # Apply theme to foot labels
         self.update_foot_labels_theme()
 
     def apply_theme(self):
@@ -223,7 +232,7 @@ class BaseVideoPlayer(QMainWindow):
             self.setStyleSheet(self.get_dark_stylesheet())
         else:
             self.setStyleSheet(self.get_light_stylesheet())
-        # Aggiorna le etichette dei piedi in base al tema
+        # Update foot labels based on the theme
         self.update_foot_labels_theme()
 
     def update_foot_labels_theme(self):
@@ -293,8 +302,8 @@ class BaseVideoPlayer(QMainWindow):
 
     def open_folder(self, folder_path):
         self.open_folder_label.hide()
-        self.folder_path = folder_path  # Memorizza il percorso della cartella
-        # Trova il file video e i due file CSV nella cartella
+        self.folder_path = folder_path  # Store folder path
+        # Find video file and two CSV files in the folder
         video_file = None
         csv_files = []
         for file in os.listdir(folder_path):
@@ -303,15 +312,15 @@ class BaseVideoPlayer(QMainWindow):
             elif file.lower().endswith('.csv'):
                 csv_files.append(os.path.join(folder_path, file))
         if video_file and len(csv_files) == 2:
-            # Ricarica il video e i dati
+            # Reload video and data
             self.load_video_and_data(video_file, csv_files)
-            # Salva l'ultima cartella aperta
+            # Save last opened folder
             self.save_last_folder(folder_path)
         else:
             QMessageBox.warning(self, "Errore", "La cartella deve contenere un file video e due file CSV.")
 
     def save_last_folder(self, folder_path):
-        app_config_file = os.path.join(os.path.expanduser('~'), '.app_config.json')
+        app_config_file = os.path.join(self.app_data_dir, 'app_config.json')
         try:
             app_config = {}
             if os.path.exists(app_config_file):
@@ -324,27 +333,27 @@ class BaseVideoPlayer(QMainWindow):
             print(f"Errore nel salvataggio dell'ultima cartella: {e}")
 
     def load_last_folder(self):
-        app_config_file = os.path.join(os.path.expanduser('~'), '.app_config.json')
+        app_config_file = os.path.join(self.app_data_dir, 'app_config.json')
         if os.path.exists(app_config_file):
             try:
                 with open(app_config_file, 'r') as f:
                     app_config = json.load(f)
                     last_folder = app_config.get('last_folder')
                     if last_folder and os.path.exists(last_folder):
-                        # Tenta di aprire l'ultima cartella
+                        # Attempt to open the last folder
                         self.open_folder(last_folder)
             except Exception as e:
                 print(f"Errore nel caricamento dell'ultima cartella: {e}")
 
     def load_video_and_data(self, video_filePath, csv_filePaths):
-        # Memorizza i percorsi dei file CSV
+        # Store CSV file paths
         self.csv_filePaths = csv_filePaths.copy()
 
-        # Chiudi la cattura video corrente se presente
+        # Close current video capture if present
         if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
 
-        # Carica il video
+        # Load video
         self.video_path = video_filePath
         self.cap = cv2.VideoCapture(self.video_path)
         if not self.cap.isOpened():
@@ -358,44 +367,44 @@ class BaseVideoPlayer(QMainWindow):
         self.trackbar.setRange(0, self.total_frames - 1)
         self.video_finished = False
 
-        # Controllo della riproduzione video
+        # Video playback control
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.next_frame)
         self.is_playing = False
 
-        # Carica e pre-processa i dati per il plotting
+        # Load and preprocess data for plotting
         self.load_and_preprocess_data(csv_filePaths[0], csv_filePaths[1])
 
-        # Carica la configurazione se esiste
+        # Load configuration if exists
         self.load_config()
 
-        # Regola il layout in base alle dimensioni del video
+        # Adjust layout based on video dimensions
         width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         if width > height:
-            # Video orizzontale
+            # Horizontal video
             self.adjust_layout(Qt.Vertical)
         else:
-            # Video verticale
+            # Vertical video
             self.adjust_layout(Qt.Horizontal)
 
-        # Aggiorna i componenti UI
+        # Update UI components
         self.show_first_frame()
         self.update_selected_columns()
         self.update_frame_counter()
 
     def adjust_layout(self, orientation):
-        # Rimuovi i widget esistenti se presenti
+        # Remove existing widgets if present
         if hasattr(self, 'main_splitter'):
             self.main_splitter.deleteLater()
 
         self.main_splitter = QSplitter(orientation, self.central_widget)
 
-        # Aggiungi lo splitter principale al layout centrale
+        # Add main splitter to central layout
         self.video_graphs_layout.addWidget(self.main_splitter)
 
-        # Crea un contenitore per il video e il pannello di controllo
+        # Create container for video and control panel
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
         video_layout.addWidget(self.video_label)
@@ -413,28 +422,28 @@ class BaseVideoPlayer(QMainWindow):
             return
 
         for data in [self.data_right, self.data_left]:
-            # Converte Timestamp in datetime
+            # Convert Timestamp to datetime
             data['Timestamp'] = pd.to_datetime(data['Timestamp'], format='%H:%M:%S.%f', errors='coerce')
             data.dropna(subset=['Timestamp'], inplace=True)
             data['Timestamp'] = (data['Timestamp'] - data['Timestamp'].iloc[0]).dt.total_seconds()
             data.sort_values('Timestamp', inplace=True)
             data.reset_index(drop=True, inplace=True)
 
-            # Crea 'VideoTime' inizialmente uguale a 'Timestamp'
+            # Create 'VideoTime' initially equal to 'Timestamp'
             data['VideoTime'] = data['Timestamp']
 
-        # Gestisce i valori mancanti
+        # Handle missing values
         self.data_right.interpolate(method='linear', inplace=True)
         self.data_left.interpolate(method='linear', inplace=True)
 
     def switch_csv_files(self):
-        # Scambia i dati sinistri e destri
+        # Swap left and right data
         self.data_left, self.data_right = self.data_right, self.data_left
-        # Scambia i percorsi dei file CSV
+        # Swap CSV file paths
         self.csv_filePaths[0], self.csv_filePaths[1] = self.csv_filePaths[1], self.csv_filePaths[0]
-        # Aggiorna i grafici
+        # Update graphs
         self.update_plot_widgets()
-        # Salva la configurazione aggiornata
+        # Save updated configuration
         self.save_config()
 
     def show_first_frame(self):
@@ -464,7 +473,7 @@ class BaseVideoPlayer(QMainWindow):
         if self.is_playing:
             self.timer.stop()
             self.timer.start(int(1000 / (self.video_fps * self.playback_speed)))
-        # Salva la configurazione aggiornata
+        # Save updated configuration
         self.save_config()
 
     def seek_video(self):
@@ -479,7 +488,7 @@ class BaseVideoPlayer(QMainWindow):
             self.update_frame_display(frame)
             self.update_graphs()
         self.video_finished = False
-        # Salva la configurazione aggiornata
+        # Save updated configuration
         self.save_config()
 
     def handle_slider_move(self, position):
@@ -489,7 +498,7 @@ class BaseVideoPlayer(QMainWindow):
         if ret:
             self.update_frame_display(frame)
             self.update_graphs()
-        # Salva la configurazione aggiornata
+        # Save updated configuration
         self.save_config()
 
     def update_frame_display(self, frame):
@@ -517,10 +526,10 @@ class BaseVideoPlayer(QMainWindow):
         self.timer.start(int(1000 / (self.video_fps * self.playback_speed)))
 
     def update_graphs(self):
-        # Calcola il timestamp video corrente considerando l'offset
+        # Calculate current video timestamp considering offset
         current_video_time = self.video_timestamps[self.current_frame]
 
-        # Applica l'offset temporale
+        # Apply time offset
         synced_time = current_video_time - self.sync_offset
 
         for i, (plot_widget, moving_points, columns, data) in enumerate(self.plot_widgets):
@@ -529,7 +538,7 @@ class BaseVideoPlayer(QMainWindow):
 
             x = data['VideoTime'].values[closest_index]
 
-            # Aggiorna i punti mobili per le colonne selezionate
+            # Update moving points for selected columns
             point_idx = 0
             for j, column in enumerate(plot_widget.all_columns):
                 if column in plot_widget.selected_columns:
@@ -539,14 +548,14 @@ class BaseVideoPlayer(QMainWindow):
 
     def toggle_synchronization(self):
         if self.sync_state is None:
-            # Inizia la sincronizzazione
+            # Start synchronization
             self.sync_state = "video"
             self.sync_status_label.setText("Sincronizzazione: Naviga al frame desiderato e clicca 'Imposta Punto di Sync'")
             self.sync_status_label.show()
             self.set_sync_point_button.show()
             self.sync_button.setText("Annulla Sync")
         else:
-            # Annulla la sincronizzazione
+            # Cancel synchronization
             self.sync_state = None
             self.sync_status_label.hide()
             self.set_sync_point_button.hide()
@@ -554,18 +563,18 @@ class BaseVideoPlayer(QMainWindow):
             self.sync_video_time = None
             self.sync_data_time = None
             QApplication.restoreOverrideCursor()
-            # Ripristina l'interattività
+            # Restore interactivity
             for idx, (plot_widget, _, _, _) in enumerate(self.plot_widgets):
                 self.stop_interactivity(plot_widget, idx)
 
     def set_sync_point_video(self):
         if self.sync_state == "video":
-            # Salva il timestamp video corrente come punto di sincronizzazione
+            # Save current video timestamp as sync point
             self.sync_video_time = self.video_timestamps[self.current_frame]
             self.sync_state = "data"
             self.sync_status_label.setText("Sincronizzazione: Clicca sul grafico per impostare il punto di sincronizzazione dei dati")
             QApplication.setOverrideCursor(QCursor(Qt.CrossCursor))
-            # Attiva la modalità di selezione del punto dati
+            # Activate data point selection mode
             for idx, (plot_widget, _, _, _) in enumerate(self.plot_widgets):
                 self.interactive_flags[idx] = True
                 plot_widget.setMouseTracking(True)
@@ -582,11 +591,11 @@ class BaseVideoPlayer(QMainWindow):
         vb = widget.plotItem.vb
         mouse_point = vb.mapSceneToView(pos)
         data = self.plot_widgets[idx][-1]
-        # Trova l'indice più vicino al punto cliccato
+        # Find index closest to clicked point
         closest_index = np.abs(data['VideoTime'] - mouse_point.x()).idxmin()
         self.sync_data_time = data['VideoTime'].values[closest_index]
 
-        # Disabilita l'interattività per tutti i grafici
+        # Disable interactivity for all graphs
         for idx, (plot_widget, _, _, _) in enumerate(self.plot_widgets):
             self.stop_interactivity(plot_widget, idx)
         QApplication.restoreOverrideCursor()
@@ -596,40 +605,40 @@ class BaseVideoPlayer(QMainWindow):
         self.check_sync_ready()
 
     def check_sync_ready(self):
-        # Se entrambi i punti di sincronizzazione sono selezionati, calcola l'offset
+        # If both sync points are selected, calculate offset
         if self.sync_video_time is not None and self.sync_data_time is not None:
             self.sync_offset = self.sync_video_time - self.sync_data_time
             print(f"Offset di sincronizzazione impostato a {self.sync_offset} secondi")
-            # Aggiorna i grafici per riflettere la nuova sincronizzazione
+            # Update graphs to reflect new synchronization
             self.update_graphs()
-            # Reimposta i punti di sincronizzazione
+            # Reset sync points
             self.sync_video_time = None
             self.sync_data_time = None
-            # Assicura che la riproduzione possa procedere
+            # Ensure playback can proceed
             self.is_playing = False
             self.play_button.setText("Play")
             self.play_button.setIcon(QIcon("play.png"))
-            # Salva la configurazione aggiornata
+            # Save updated configuration
             self.save_config()
 
     def reset_synchronization(self):
-        # Reimposta l'offset di sincronizzazione
+        # Reset synchronization offset
         self.sync_offset = 0.0
         self.update_graphs()
         self.save_config()
         QMessageBox.information(self, "Sincronizzazione Reimpostata", "L'offset di sincronizzazione è stato reimpostato.")
 
     def reset_settings(self):
-        # Chiede conferma all'utente
+        # Ask for user confirmation
         reply = QMessageBox.question(self, 'Reimposta Impostazioni',
                                      'Sei sicuro di voler reimpostare tutte le impostazioni ai valori predefiniti?',
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
-            # Cancella il file di configurazione
-            config_file = os.path.join(self.folder_path, '.config.json')
+            # Delete configuration file
+            config_file = os.path.join(self.app_data_dir, 'config.json')
             if os.path.exists(config_file):
                 os.remove(config_file)
-            # Reimposta le impostazioni
+            # Reset settings
             self.sync_offset = 0.0
             self.playback_speed = 1.0
             self.speed_selector.setCurrentText("1x")
@@ -651,7 +660,7 @@ class BaseVideoPlayer(QMainWindow):
         else:
             self.theme = 'dark'
         self.apply_theme()
-        # Aggiorna i grafici
+        # Update graphs
         for plot_widget, _, _, _ in self.plot_widgets:
             if self.theme == 'dark':
                 plot_widget.setBackground('#2E2E2E')
@@ -663,7 +672,7 @@ class BaseVideoPlayer(QMainWindow):
             plot_widget.getAxis('bottom').setPen(pg.mkPen(color=axis_color, width=1))
             plot_widget.getAxis('left').setTextPen(pg.mkPen(color=axis_color))
             plot_widget.getAxis('bottom').setTextPen(pg.mkPen(color=axis_color))
-        # Salva la configurazione aggiornata
+        # Save updated configuration
         self.save_config()
 
     def stop_interactivity(self, widget, idx):
@@ -672,7 +681,7 @@ class BaseVideoPlayer(QMainWindow):
         try:
             widget.scene().sigMouseMoved.disconnect()
         except TypeError:
-            pass  # Già disconnesso
+            pass  # Already disconnected
 
     def closeEvent(self, event):
         if hasattr(self, 'folder_path'):
@@ -720,7 +729,7 @@ class BaseVideoPlayer(QMainWindow):
             self.update_graphs()
         self.update_frame_counter()
         self.video_finished = False
-        # Salva la configurazione aggiornata
+        # Save updated configuration
         self.save_config()
 
     def update_selected_columns(self):
@@ -728,11 +737,11 @@ class BaseVideoPlayer(QMainWindow):
         if selected_columns != self.selected_columns:
             self.selected_columns = selected_columns
             self.update_plot_widgets()
-            # Salva la configurazione aggiornata
+            # Save updated configuration
             self.save_config()
 
     def update_plot_widgets(self):
-        # Rimuovi i grafici esistenti
+        # Remove existing graphs
         for widget, _, _, _ in self.plot_widgets:
             widget.deleteLater()
         self.plot_widgets.clear()
@@ -741,7 +750,7 @@ class BaseVideoPlayer(QMainWindow):
         if not self.selected_columns:
             return
 
-        # Aggiorna i grafici per il piede destro
+        # Update graphs for right foot
         if "Accelerazioni Dx (Ax, Ay, Az)" in self.selected_columns:
             self.create_plot_widget(["Ax", "Ay", "Az"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right)
 
@@ -751,7 +760,7 @@ class BaseVideoPlayer(QMainWindow):
         if "Pressione Dx (S0, S1, S2)" in self.selected_columns:
             self.create_plot_widget(["S0", "S1", "S2"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right)
 
-        # Aggiorna i grafici per il piede sinistro
+        # Update graphs for left foot
         if "Accelerazioni Sx (Ax, Ay, Az)" in self.selected_columns:
             self.create_plot_widget(["Ax", "Ay", "Az"], ["#FFA500", "#800080", "#008080"], self.data_left)
 
@@ -771,7 +780,7 @@ class BaseVideoPlayer(QMainWindow):
             axis_color = '#000000'
         plot_widget.showGrid(x=True, y=True, alpha=0.3)
 
-        # Crea etichette personalizzate per l'asse Y in una sola riga
+        # Create custom Y-axis labels in one line
         ylabel = ", ".join([f"<span style='color: {colors[i]};'>{column}</span>" for i, column in enumerate(columns)])
 
         plot_widget.setLabel('left', ylabel)
@@ -782,36 +791,36 @@ class BaseVideoPlayer(QMainWindow):
         plot_widget.getAxis('bottom').setTextPen(pg.mkPen(color=axis_color))
         self.graph_splitter.addWidget(plot_widget)
 
-        # Memorizza le colonne e i dati nel plot_widget per accesso futuro
+        # Store columns and data in plot_widget for future access
         plot_widget.all_columns = columns
         plot_widget.data = data
-        plot_widget.selected_columns = columns.copy()  # Inizialmente tutte le colonne sono selezionate
+        plot_widget.selected_columns = columns.copy()  # Initially all columns are selected
         plot_widget.colors = colors
 
-        # Accedi alla ViewBox del grafico
+        # Access the ViewBox of the graph
         view_box = plot_widget.getViewBox()
 
-        # Crea una nuova QAction per selezionare i datapoint
+        # Create a new QAction to select datapoints
         select_datapoints_action = QAction("Seleziona Datapoint", plot_widget)
         select_datapoints_action.triggered.connect(lambda: self.select_datapoints(plot_widget))
 
-        # Aggiungi l'azione al menu contestuale della ViewBox
+        # Add action to ViewBox context menu
         view_box.menu.addAction(select_datapoints_action)
 
-        # Aggiungi il plot_widget al layout e aggiorna la lista plot_widgets
+        # Add plot_widget to layout and update plot_widgets list
         self.plot_widgets.append((plot_widget, [], columns, data))
         self.interactive_flags.append(False)
 
-        # Plotta i dati iniziali
+        # Plot initial data
         self.update_plot_widget(plot_widget)
 
-        # Gestisci l'interattività
+        # Handle interactivity
         plot_widget.scene().sigMouseClicked.connect(
             lambda event, widget=plot_widget, idx=len(self.plot_widgets) - 1: self.toggle_interactivity(event, widget, idx)
         )
 
     def select_datapoints(self, plot_widget):
-        # Crea un dialogo con checkbox per ogni colonna
+        # Create a dialog with checkboxes for each column
         dialog = QDialog(self)
         dialog.setWindowTitle("Seleziona Datapoint")
 
@@ -823,7 +832,7 @@ class BaseVideoPlayer(QMainWindow):
             layout.addWidget(checkbox)
             checkboxes.append(checkbox)
 
-        # Aggiungi pulsanti OK e Annulla
+        # Add OK and Cancel buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(dialog.accept)
         button_box.rejected.connect(dialog.reject)
@@ -831,15 +840,15 @@ class BaseVideoPlayer(QMainWindow):
 
         dialog.setLayout(layout)
 
-        # Mostra il dialogo e attendi l'input dell'utente
+        # Show dialog and wait for user input
         if dialog.exec_() == QDialog.Accepted:
-            # Aggiorna le colonne selezionate in base all'input dell'utente
+            # Update selected columns based on user input
             plot_widget.selected_columns = [cb.text() for cb in checkboxes if cb.isChecked()]
-            # Aggiorna il grafico
+            # Update graph
             self.update_plot_widget(plot_widget)
 
     def update_plot_widget(self, plot_widget):
-        # Cancella i grafici esistenti
+        # Clear existing graphs
         plot_widget.clear()
 
         data = plot_widget.data
@@ -848,7 +857,7 @@ class BaseVideoPlayer(QMainWindow):
 
         moving_points = []
 
-        # Plotta nuovamente le colonne selezionate
+        # Re-plot selected columns
         for i, column in enumerate(plot_widget.all_columns):
             if column in selected_columns:
                 color = colors[i]
@@ -860,7 +869,7 @@ class BaseVideoPlayer(QMainWindow):
                                                 pen=None, symbol='o', symbolBrush=color)
                 moving_points.append(moving_point)
 
-        # Aggiorna i punti mobili in plot_widgets
+        # Update moving points in plot_widgets
         for idx, (pw, _, cols, _) in enumerate(self.plot_widgets):
             if pw == plot_widget:
                 self.plot_widgets[idx] = (plot_widget, moving_points, plot_widget.all_columns, data)
@@ -869,14 +878,14 @@ class BaseVideoPlayer(QMainWindow):
     @pyqtSlot(object)
     def on_mouse_moved(self, pos, widget, idx):
         if self.sync_state == "data":
-            return  # Evita interferenze con la modalità sync
+            return  # Avoid interference with sync mode
 
         vb = widget.plotItem.vb
         mouse_point = vb.mapSceneToView(pos)
-        data = self.plot_widgets[idx][-1]  # Recupera i dati associati
-        # Applica l'offset di sincronizzazione
+        data = self.plot_widgets[idx][-1]  # Retrieve associated data
+        # Apply synchronization offset
         synced_time = mouse_point.x() + self.sync_offset
-        # Trova il frame video corrispondente
+        # Find corresponding video frame
         synced_time_clipped = max(0, min(self.video_timestamps[-1], synced_time))
         closest_frame = np.abs(self.video_timestamps - synced_time_clipped).argmin()
         self.current_frame = closest_frame
@@ -893,11 +902,11 @@ class BaseVideoPlayer(QMainWindow):
         try:
             widget.scene().sigMouseMoved.disconnect()
         except TypeError:
-            pass  # Già disconnesso
+            pass  # Already disconnected
 
     def toggle_interactivity(self, event, widget, idx):
         if self.sync_state == "data":
-            return  # Evita interferenze con la modalità sync
+            return  # Avoid interference with sync mode
 
         if not self.interactive_flags[idx]:
             self.interactive_flags[idx] = True
@@ -907,30 +916,30 @@ class BaseVideoPlayer(QMainWindow):
             self.stop_interactivity(widget, idx)
 
     def load_config(self):
-        config_file = os.path.join(self.folder_path, '.config.json')
+        config_file = os.path.join(self.app_data_dir, 'config.json')
         if os.path.exists(config_file):
             with open(config_file, 'r') as f:
                 self.config = json.load(f)
-            # Imposta le impostazioni dalla configurazione
+            # Set settings from configuration
             self.sync_offset = float(self.config.get('sync_offset', 0.0))
             self.playback_speed = float(self.config.get('playback_speed', 1.0))
-            # Imposta il selettore di velocità
+            # Set speed selector
             speed_text = f"{self.playback_speed}x"
             if speed_text in [self.speed_selector.itemText(i) for i in range(self.speed_selector.count())]:
                 self.speed_selector.setCurrentText(speed_text)
             else:
                 self.speed_selector.addItem(speed_text)
                 self.speed_selector.setCurrentText(speed_text)
-            # Imposta il frame corrente
+            # Set current frame
             self.current_frame = int(self.config.get('current_frame', 0))
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-            # Aggiorna la visualizzazione del video
+            # Update video display
             ret, frame = self.cap.read()
             if ret:
                 self.update_frame_display(frame)
                 self.update_graphs()
 
-            # Aggiorna i percorsi dei file CSV in base alla configurazione
+            # Update CSV file paths based on configuration
             right_csv = self.config.get('right_csv')
             left_csv = self.config.get('left_csv')
             if right_csv and left_csv:
@@ -938,33 +947,33 @@ class BaseVideoPlayer(QMainWindow):
                 self.csv_filePaths[1] = os.path.join(self.folder_path, left_csv)
                 self.load_and_preprocess_data(self.csv_filePaths[0], self.csv_filePaths[1])
 
-            # Imposta le colonne selezionate
+            # Set selected columns
             selected_columns = self.config.get('selected_columns', [])
             for checkbox in (self.checkboxes_right + self.checkboxes_left):
                 if checkbox.text() in selected_columns:
                     checkbox.setChecked(True)
                 else:
                     checkbox.setChecked(False)
-            # Aggiorna i grafici
+            # Update graphs
             self.update_selected_columns()
-            # Imposta il tema
+            # Set theme
             self.theme = self.config.get('theme', 'dark')
             self.apply_theme()
         else:
             self.config = {}
 
     def save_config(self):
-        config_file = os.path.join(self.folder_path, '.config.json')
+        config_file = os.path.join(self.app_data_dir, 'config.json')
         self.config['sync_offset'] = float(self.sync_offset)
         self.config['playback_speed'] = float(self.playback_speed)
         self.config['current_frame'] = int(self.current_frame)
         self.config['selected_columns'] = [checkbox.text() for checkbox in (self.checkboxes_right + self.checkboxes_left) if checkbox.isChecked()]
-        # Memorizza quali CSV sono assegnati ai piedi
+        # Store which CSVs are assigned to feet
         self.config['right_csv'] = os.path.basename(self.csv_filePaths[0])
         self.config['left_csv'] = os.path.basename(self.csv_filePaths[1])
-        # Salva il tema corrente
+        # Save current theme
         self.config['theme'] = self.theme
-        # Converti tutti i valori in tipi standard per evitare problemi con JSON
+        # Convert all values to standard types to avoid issues with JSON
         def convert_types(obj):
             if isinstance(obj, dict):
                 return {k: convert_types(v) for k, v in obj.items()}
@@ -980,7 +989,7 @@ class BaseVideoPlayer(QMainWindow):
         config_to_save = convert_types(self.config)
 
         with open(config_file, 'w') as f:
-            json.dump(config_to_save, f)
+            json.dump(config_to_save, f, indent=4)
 
     @staticmethod
     def extract_sensor_rate(csv_filePath):
@@ -988,11 +997,10 @@ class BaseVideoPlayer(QMainWindow):
         with open(csv_filePath, 'r') as f:
             for line in f:
                 if "SamplingFrequency" in line:
-                    # Estrai il valore dopo 'SamplingFrequency:'
+                    # Extract value after 'SamplingFrequency:'
                     sensor_rate = int(line.split(":")[1].strip())
                     break
 
         if sensor_rate is None:
             raise ValueError("SamplingFrequency non trovato nell'header del file.")
         return sensor_rate
-
