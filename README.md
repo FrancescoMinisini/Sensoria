@@ -1,5 +1,3 @@
-Aggiornamento del README.md
-Ecco il README.md aggiornato con tutte le istruzioni dettagliate:
 
 # Video Player with Interactive Graphs
 
