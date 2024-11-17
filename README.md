@@ -23,7 +23,7 @@ Questa applicazione è un video player avanzato con grafici interattivi che perm
 1. **Clona il repository**
 
    ```bash
-   git clone https://github.com/tuo-username/tuo-repository.git
+   git clone https://github.com/FrancescoMinisini/Sensoria.git
    cd tuo-repository
 2. **Crea un ambiente virtuale (opzionale ma consigliato)**
    ```bash
@@ -33,13 +33,13 @@ Questa applicazione è un video player avanzato con grafici interattivi che perm
    Assicurati di avere un file requirements.txt con tutte le librerie necessarie:
    
    ```plaintext
-   PyQt5==5.15.7
-   pandas==1.5.3
-   numpy==1.23.5
-   pyqtgraph==0.13.1
-   opencv-python==4.6.0.66
-   platformdirs==3.5.0
-   pyinstaller==5.13.0
+   PyQt5
+   pandas
+   numpy
+   pyqtgraph
+   opencv-python
+   platformdirs
+   pyinstaller
 Poi esegui:   
    ```bash
    pip install -r requirements.txt 
