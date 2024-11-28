@@ -8,7 +8,7 @@ import hashlib
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QPointF
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                              QSplitter, QPushButton, QCheckBox, QSizePolicy, QApplication,
-                             QAction, QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox, QListWidget)
+                             QAction, QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox, QListWidget, QGridLayout)
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QCursor
 import pyqtgraph as pg
 from platformdirs import user_data_dir, user_cache_dir
@@ -118,17 +118,43 @@ class BaseVideoPlayer(QMainWindow):
         self.video_graphs_layout = QVBoxLayout()
         self.central_layout.addLayout(self.video_graphs_layout)
 
+        # Video display widget
+        self.video_widget = QWidget(self)
+        self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_graphs_layout.addWidget(self.video_widget)
+
+        # Layout for the video widget
+        self.video_layout = QGridLayout(self.video_widget)
+        self.video_layout.setContentsMargins(0, 0, 0, 0)
+        self.video_layout.setSpacing(0)
+
         # Video display label
-        self.video_label = QLabel(self)
+        self.video_label = QLabel(self.video_widget)
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_graphs_layout.addWidget(self.video_label)
+        self.video_layout.addWidget(self.video_label, 0, 0)
 
         # Message to open a folder
-        self.open_folder_label = QLabel("Per favore, apri una cartella per iniziare", self)
+        self.open_folder_label = QLabel("Per favore, apri una cartella per iniziare", self.video_widget)
         self.open_folder_label.setAlignment(Qt.AlignCenter)
-        self.open_folder_label.setStyleSheet("color: #F0F0F0; font-size: 16px; font-weight: bold;")
-        self.video_graphs_layout.addWidget(self.open_folder_label)
+        self.open_folder_label.setStyleSheet("color: #F0F0F0; font-size: 16px; font-weight: bold; background-color: rgba(0, 0, 0, 128);")
+        self.video_layout.addWidget(self.open_folder_label, 0, 0, Qt.AlignCenter)
+
+        # Synchronization status label
+        self.sync_status_label = QLabel("", self.video_widget)
+        self.sync_status_label.setAlignment(Qt.AlignCenter)
+        self.sync_status_label.setStyleSheet("color: #FFD700; font-size: 14px; font-weight: bold; background-color: rgba(0, 0, 0, 128);")
+        self.sync_status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.sync_status_label.hide()  # Hidden by default
+        self.video_layout.addWidget(self.sync_status_label, 0, 0, Qt.AlignTop | Qt.AlignHCenter)
+
+        # Label to display timestamp when hovering over the graph
+        self.mouse_timestamp_label = QLabel("", self.video_widget)
+        self.mouse_timestamp_label.setAlignment(Qt.AlignRight)
+        self.mouse_timestamp_label.setStyleSheet("color: #FFD700; font-size: 12px; background-color: rgba(0, 0, 0, 128);")
+        self.mouse_timestamp_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.mouse_timestamp_label.hide()  # Initially hidden
+        self.video_layout.addWidget(self.mouse_timestamp_label, 0, 0, Qt.AlignBottom | Qt.AlignRight)
 
         # Control panel
         self.control_panel = QWidget(self)
@@ -177,13 +203,6 @@ class BaseVideoPlayer(QMainWindow):
         self.frame_counter = QLabel(f"Frame: 0/0", self)
         self.frame_counter.setObjectName("FrameCounter")
         self.control_layout.addWidget(self.frame_counter)
-
-        # Synchronization status label
-        self.sync_status_label = QLabel("", self)
-        self.sync_status_label.setAlignment(Qt.AlignCenter)
-        self.sync_status_label.setStyleSheet("color: #FFD700; font-size: 14px; font-weight: bold;")
-        self.sync_status_label.hide()  # Hidden by default
-        self.video_graphs_layout.addWidget(self.sync_status_label)
 
         # Container for controls and graphs
         self.controls_and_graphs_container = QWidget(self)
@@ -238,13 +257,6 @@ class BaseVideoPlayer(QMainWindow):
 
         # Apply theme to foot labels
         self.update_foot_labels_theme()
-
-        # Label to display timestamp when hovering over the graph
-        self.mouse_timestamp_label = QLabel("", self)
-        self.mouse_timestamp_label.setAlignment(Qt.AlignRight)
-        self.mouse_timestamp_label.setStyleSheet("color: #FFD700; font-size: 12px;")
-        self.mouse_timestamp_label.hide()  # Initially hidden
-        self.video_graphs_layout.addWidget(self.mouse_timestamp_label)
 
     def apply_theme(self):
         if self.theme == 'dark':
@@ -492,7 +504,7 @@ class BaseVideoPlayer(QMainWindow):
         # Create container for video and control panel
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
-        video_layout.addWidget(self.video_label)
+        video_layout.addWidget(self.video_widget)
         video_layout.addWidget(self.control_panel)
 
         self.main_splitter.addWidget(video_container)
