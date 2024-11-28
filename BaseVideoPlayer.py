@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 import hashlib
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QPointF
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                              QSplitter, QPushButton, QCheckBox, QSizePolicy, QApplication,
                              QAction, QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox, QListWidget)
@@ -919,7 +919,7 @@ class BaseVideoPlayer(QMainWindow):
         select_datapoints_action = QAction("Seleziona Datapoint", plot_widget)
         select_datapoints_action.triggered.connect(lambda: self.select_datapoints(plot_widget))
 
-        # Add action to the ViewBox context menu
+        # Add context menu options
         view_box.menu.addAction(select_datapoints_action)
 
         # Add context menu options for adding markers
@@ -931,6 +931,18 @@ class BaseVideoPlayer(QMainWindow):
 
         view_box.menu.addAction(add_marker_here_action)
         view_box.menu.addAction(add_marker_current_time_action)
+
+        # Create action for removing marker (hidden by default)
+        remove_marker_action = QAction("Rimuovi Marker Qui", plot_widget)
+        remove_marker_action.triggered.connect(lambda: self.remove_marker_here(plot_widget))
+        remove_marker_action.setVisible(False)
+        view_box.menu.addAction(remove_marker_action)
+
+        # Store actions for later use
+        plot_widget.remove_marker_action = remove_marker_action
+
+        # Connect to aboutToShow signal to update menu before showing
+        view_box.menu.aboutToShow.connect(lambda vw=view_box, pw=plot_widget: self.update_context_menu(vw, pw))
 
         # Add the plot_widget to the layout and update the plot_widgets list
         self.plot_widgets.append((plot_widget, [], columns, data))
@@ -948,6 +960,24 @@ class BaseVideoPlayer(QMainWindow):
         plot_widget.scene().sigMouseMoved.connect(
             lambda pos, widget=plot_widget: self.on_mouse_hover(pos, widget)
         )
+
+    def update_context_menu(self, view_box, plot_widget):
+        # Update the visibility of "Rimuovi Marker Qui" based on click position
+        if hasattr(self, 'context_menu_event_pos'):
+            pos = self.context_menu_event_pos
+            vb = plot_widget.plotItem.vb
+            mouse_point = vb.mapSceneToView(pos)
+            timestamp = mouse_point.x()
+
+            # Find the nearest marker within a threshold
+            threshold = 0.1  # Adjust as needed (in seconds)
+            distances = np.abs(np.array(self.step_markers) - timestamp)
+            min_distance = np.min(distances) if len(distances) > 0 else np.inf
+
+            if min_distance <= threshold:
+                plot_widget.remove_marker_action.setVisible(True)
+            else:
+                plot_widget.remove_marker_action.setVisible(False)
 
     def select_datapoints(self, plot_widget):
         # Create a dialog with checkboxes for each column
@@ -1034,6 +1064,31 @@ class BaseVideoPlayer(QMainWindow):
         # Save updated configuration
         self.save_config()
 
+    def remove_marker_here(self, plot_widget):
+        # Get mouse position at the time of context menu invocation
+        pos = self.context_menu_event_pos
+
+        vb = plot_widget.plotItem.vb
+        mouse_point = vb.mapSceneToView(pos)
+        timestamp = mouse_point.x()
+
+        # Find the nearest marker within a threshold
+        threshold = 0.1  # Adjust as needed (in seconds)
+        distances = np.abs(np.array(self.step_markers) - timestamp)
+        min_distance = np.min(distances) if len(distances) > 0 else np.inf
+
+        if min_distance <= threshold:
+            idx_to_remove = np.argmin(distances)
+            # Remove the marker
+            del self.step_markers[idx_to_remove]
+            # Update graphs
+            for pw, _, _, _ in self.plot_widgets:
+                self.update_step_markers(pw)
+            # Save updated configuration
+            self.save_config()
+        else:
+            QMessageBox.information(self, "Nessun Marker Vicino", "Non ci sono marker vicini alla posizione selezionata.")
+
     @pyqtSlot(object)
     def on_mouse_moved(self, pos, widget, idx):
         if self.sync_state == "data":
@@ -1078,7 +1133,7 @@ class BaseVideoPlayer(QMainWindow):
         if event.button() == Qt.RightButton:
             # Store the position where the context menu is invoked
             self.context_menu_event_pos = event.scenePos()
-            # Right-click behavior is now handled by context menu actions
+            # The context menu will be updated via the aboutToShow signal
             pass
         else:
             if not self.interactive_flags[idx]:
@@ -1102,9 +1157,18 @@ class BaseVideoPlayer(QMainWindow):
             with open(config_file, 'r') as f:
                 self.config = json.load(f)
 
+            # Update CSV file paths based on configuration
+            right_csv = self.config.get('right_csv')
+            left_csv = self.config.get('left_csv')
+            if right_csv and left_csv:
+                self.csv_filePaths[0] = os.path.join(self.folder_path, right_csv)
+                self.csv_filePaths[1] = os.path.join(self.folder_path, left_csv)
+                # Load and preprocess data before loading step markers
+                self.load_and_preprocess_data(self.csv_filePaths[0], self.csv_filePaths[1])
 
             # Load step markers AFTER loading data
             self.step_markers = self.config.get('step_markers', [])
+
             # Set settings from configuration
             self.sync_offset = float(self.config.get('sync_offset', 0.0))
             self.playback_speed = float(self.config.get('playback_speed', 1.0))
@@ -1116,8 +1180,6 @@ class BaseVideoPlayer(QMainWindow):
                 self.speed_selector.addItem(speed_text)
                 self.speed_selector.setCurrentText(speed_text)
 
-            # Load step markers BEFORE updating graphs
-            self.step_markers = self.config.get('step_markers')
             # Set current frame
             self.current_frame = int(self.config.get('current_frame', 0))
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
@@ -1125,15 +1187,6 @@ class BaseVideoPlayer(QMainWindow):
             ret, frame = self.cap.read()
             if ret:
                 self.update_frame_display(frame)
-
-
-            # Update CSV file paths based on configuration
-            right_csv = self.config.get('right_csv')
-            left_csv = self.config.get('left_csv')
-            if right_csv and left_csv:
-                self.csv_filePaths[0] = os.path.join(self.folder_path, right_csv)
-                self.csv_filePaths[1] = os.path.join(self.folder_path, left_csv)
-                self.load_and_preprocess_data(self.csv_filePaths[0], self.csv_filePaths[1])
 
             # Set selected columns
             selected_columns = self.config.get('selected_columns', [])
