@@ -183,12 +183,17 @@ class BaseVideoPlayer(QMainWindow):
         self.sync_button.clicked.connect(self.toggle_synchronization)
         self.control_layout.addWidget(self.sync_button)
 
-        # Button to set synchronization point (visible only during synchronization)
-        self.set_sync_point_button = QPushButton("Imposta Punto di Sync")
-        self.set_sync_point_button.setToolTip("Clicca per impostare il punto di sincronizzazione al frame video corrente.")
+        # Button to cancel synchronization (will replace sync_button during synchronization)
+        self.cancel_sync_button = QPushButton("Cancel Sync")
+        self.cancel_sync_button.setToolTip("Clicca per annullare la sincronizzazione.")
+        self.cancel_sync_button.clicked.connect(self.toggle_synchronization)
+        self.cancel_sync_button.hide()  # Hidden by default
+
+        # Button to set synchronization point (will replace 'Aggiungi Marker Passo' during synchronization)
+        self.set_sync_point_button = QPushButton("Imposta Punto Sync")
+        self.set_sync_point_button.setToolTip("Clicca per impostare il punto di sincronizzazione.")
         self.set_sync_point_button.clicked.connect(self.set_sync_point_video)
         self.set_sync_point_button.hide()  # Hidden by default
-        self.control_layout.addWidget(self.set_sync_point_button)
 
         # Button to add step marker
         self.add_step_marker_button = QPushButton("Aggiungi Marker Passo")
@@ -669,16 +674,32 @@ class BaseVideoPlayer(QMainWindow):
         if self.sync_state is None:
             # Start synchronization
             self.sync_state = "video"
-            self.sync_status_label.setText("Sincronizzazione: Naviga al frame desiderato e clicca 'Imposta Punto di Sync'")
+            self.sync_status_label.setText("Naviga al frame desiderato e clicca 'Imposta Punto di Sync'")
             self.sync_status_label.show()
+            # Replace 'Sincronizza' button with 'Annulla Sync' button
+            self.control_layout.removeWidget(self.sync_button)
+            self.sync_button.hide()
+            self.control_layout.insertWidget(2, self.cancel_sync_button)
+            self.cancel_sync_button.show()
+            # Replace 'Aggiungi Marker Passo' button with 'Imposta Punto di Sync' button
+            self.control_layout.removeWidget(self.add_step_marker_button)
+            self.add_step_marker_button.hide()
+            self.control_layout.insertWidget(3, self.set_sync_point_button)
             self.set_sync_point_button.show()
-            self.sync_button.setText("Annulla Sync")
         else:
             # Cancel synchronization
             self.sync_state = None
             self.sync_status_label.hide()
+            # Replace 'Annulla Sync' button with 'Sincronizza' button
+            self.control_layout.removeWidget(self.cancel_sync_button)
+            self.cancel_sync_button.hide()
+            self.control_layout.insertWidget(2, self.sync_button)
+            self.sync_button.show()
+            # Replace 'Imposta Punto di Sync' button with 'Aggiungi Marker Passo' button
+            self.control_layout.removeWidget(self.set_sync_point_button)
             self.set_sync_point_button.hide()
-            self.sync_button.setText("Sincronizza")
+            self.control_layout.insertWidget(3, self.add_step_marker_button)
+            self.add_step_marker_button.show()
             self.sync_video_time = None
             self.sync_data_time = None
             QApplication.restoreOverrideCursor()
@@ -691,7 +712,7 @@ class BaseVideoPlayer(QMainWindow):
             # Save current video timestamp as synchronization point
             self.sync_video_time = self.video_timestamps[self.current_frame]
             self.sync_state = "data"
-            self.sync_status_label.setText("Sincronizzazione: Clicca sul grafico per impostare il punto di sincronizzazione dei dati")
+            self.sync_status_label.setText("Clicca sul grafico per impostare il punto di sincronizzazione dei dati")
             QApplication.setOverrideCursor(QCursor(Qt.CrossCursor))
             # Activate data point selection mode
             for idx, (plot_widget, _, _, _) in enumerate(self.plot_widgets):
@@ -700,7 +721,7 @@ class BaseVideoPlayer(QMainWindow):
                 plot_widget.scene().sigMouseClicked.connect(
                     lambda event, widget=plot_widget, idx=idx: self.on_sync_data_point_selected(event, widget, idx)
                 )
-            self.set_sync_point_button.hide()
+            # The 'Imposta Punto di Sync' button remains visible during data selection
 
     def on_sync_data_point_selected(self, event, widget, idx):
         if self.sync_state != "data":
@@ -719,7 +740,16 @@ class BaseVideoPlayer(QMainWindow):
             self.stop_interactivity(plot_widget, idx)
         QApplication.restoreOverrideCursor()
         self.sync_status_label.hide()
-        self.sync_button.setText("Sincronizza")
+        # Replace 'Annulla Sync' button with 'Sincronizza' button
+        self.control_layout.removeWidget(self.cancel_sync_button)
+        self.cancel_sync_button.hide()
+        self.control_layout.insertWidget(2, self.sync_button)
+        self.sync_button.show()
+        # Replace 'Imposta Punto di Sync' button with 'Aggiungi Marker Passo' button
+        self.control_layout.removeWidget(self.set_sync_point_button)
+        self.set_sync_point_button.hide()
+        self.control_layout.insertWidget(3, self.add_step_marker_button)
+        self.add_step_marker_button.show()
         self.sync_state = None
         self.check_sync_ready()
 
@@ -801,9 +831,9 @@ class BaseVideoPlayer(QMainWindow):
         self.interactive_flags[idx] = False
         widget.setMouseTracking(False)
         try:
-            widget.scene().sigMouseMoved.disconnect()
-        except TypeError:
-            pass  # Already disconnected
+            widget.scene().sigMouseMoved.disconnect(self.on_mouse_moved_slots[idx])
+        except (TypeError, AttributeError):
+            pass  # Already disconnected or not connected
 
     def closeEvent(self, event):
         if hasattr(self, 'folder_path'):
@@ -873,6 +903,9 @@ class BaseVideoPlayer(QMainWindow):
 
         if not self.selected_columns:
             return
+
+        # Initialize list to store on_mouse_moved slots
+        self.on_mouse_moved_slots = []
 
         # Update graphs for right foot
         if "Accelerazioni Dx (Ax, Ay, Az)" in self.selected_columns:
@@ -972,6 +1005,10 @@ class BaseVideoPlayer(QMainWindow):
         plot_widget.scene().sigMouseMoved.connect(
             lambda pos, widget=plot_widget: self.on_mouse_hover(pos, widget)
         )
+
+        # Create a unique slot for each plot_widget to prevent conflicts
+        on_mouse_moved_slot = lambda pos, widget=plot_widget, idx=len(self.plot_widgets) - 1: self.on_mouse_moved(pos, widget, idx)
+        self.on_mouse_moved_slots.append(on_mouse_moved_slot)
 
     def update_context_menu(self, view_box, plot_widget):
         # Update the visibility of "Rimuovi Marker Qui" based on click position
@@ -1134,9 +1171,9 @@ class BaseVideoPlayer(QMainWindow):
         self.interactive_flags[idx] = False
         widget.setMouseTracking(False)
         try:
-            widget.scene().sigMouseMoved.disconnect()
-        except TypeError:
-            pass  # Already disconnected
+            widget.scene().sigMouseMoved.disconnect(self.on_mouse_moved_slots[idx])
+        except (TypeError, AttributeError):
+            pass  # Already disconnected or not connected
 
     def toggle_interactivity(self, event, widget, idx):
         if self.sync_state == "data":
@@ -1151,7 +1188,7 @@ class BaseVideoPlayer(QMainWindow):
             if not self.interactive_flags[idx]:
                 self.interactive_flags[idx] = True
                 widget.setMouseTracking(True)
-                widget.scene().sigMouseMoved.connect(lambda pos, widget=widget, idx=idx: self.on_mouse_moved(pos, widget, idx))
+                widget.scene().sigMouseMoved.connect(self.on_mouse_moved_slots[idx])
             else:
                 self.stop_interactivity(widget, idx)
 
