@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 import hashlib
+import random
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QPointF
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                              QSplitter, QPushButton, QCheckBox, QSizePolicy, QApplication,
@@ -49,6 +50,9 @@ class BaseVideoPlayer(QMainWindow):
 
         # Variable to track if steps are visible
         self.show_steps = True  # Steps are visible by default
+
+        # Initialize current frame
+        self.current_frame = 0
 
         # Central widget and layout
         self.central_widget = QWidget(self)
@@ -358,77 +362,14 @@ class BaseVideoPlayer(QMainWindow):
             elif file.lower().endswith('.csv'):
                 csv_files.append(os.path.join(folder_path, file))
         if video_file and len(csv_files) >= 2:
-            # Ask the user to assign CSV files
-            assigned_csv_files = self.assign_csv_files(csv_files)
-            if assigned_csv_files:
-                # Reload video and data
-                self.load_video_and_data(video_file, assigned_csv_files)
-                # Save the last opened folder
-                self.save_last_folder(folder_path)
+            # Randomly assign CSV files to right and left foot
+            assigned_csv_files = random.sample(csv_files, 2)
+            # Reload video and data
+            self.load_video_and_data(video_file, assigned_csv_files)
+            # Save the last opened folder
+            self.save_last_folder(folder_path)
         else:
             QMessageBox.warning(self, "Errore", "La cartella deve contenere un file video e almeno due file CSV.")
-
-    def assign_csv_files(self, csv_files):
-        # Check if the assignment already exists in the configuration
-        config_file = self.get_config_file_path()
-        assigned_csv_files = None
-        if os.path.exists(config_file):
-            with open(config_file, 'r') as f:
-                self.config = json.load(f)
-            right_csv = self.config.get('right_csv')
-            left_csv = self.config.get('left_csv')
-            if right_csv and left_csv:
-                right_csv_full = os.path.join(self.folder_path, right_csv)
-                left_csv_full = os.path.join(self.folder_path, left_csv)
-                if os.path.exists(right_csv_full) and os.path.exists(left_csv_full):
-                    assigned_csv_files = [right_csv_full, left_csv_full]
-        if not assigned_csv_files:
-            # Ask the user to assign CSV files
-            dialog = QDialog(self)
-            dialog.setWindowTitle("Assegna File CSV")
-
-            layout = QVBoxLayout()
-            instructions = QLabel("Seleziona il file CSV per ciascun piede:")
-            layout.addWidget(instructions)
-
-            csv_list_widget = QListWidget()
-            csv_list_widget.addItems([os.path.basename(f) for f in csv_files])
-            layout.addWidget(QLabel("File CSV disponibili:"))
-            layout.addWidget(csv_list_widget)
-
-            right_combo = QComboBox()
-            right_combo.addItems([os.path.basename(f) for f in csv_files])
-            layout.addWidget(QLabel("Piede Destro:"))
-            layout.addWidget(right_combo)
-
-            left_combo = QComboBox()
-            left_combo.addItems([os.path.basename(f) for f in csv_files])
-            layout.addWidget(QLabel("Piede Sinistro:"))
-            layout.addWidget(left_combo)
-
-            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-            button_box.accepted.connect(dialog.accept)
-            button_box.rejected.connect(dialog.reject)
-            layout.addWidget(button_box)
-
-            dialog.setLayout(layout)
-
-            if dialog.exec_() == QDialog.Accepted:
-                right_csv = right_combo.currentText()
-                left_csv = left_combo.currentText()
-                if right_csv == left_csv:
-                    QMessageBox.warning(self, "Errore", "I file CSV per il piede destro e sinistro devono essere diversi.")
-                    return None
-                right_csv_full = os.path.join(self.folder_path, right_csv)
-                left_csv_full = os.path.join(self.folder_path, left_csv)
-                assigned_csv_files = [right_csv_full, left_csv_full]
-                # Save the assignment in the configuration
-                self.config['right_csv'] = right_csv
-                self.config['left_csv'] = left_csv
-                self.save_config()
-            else:
-                return None
-        return assigned_csv_files
 
     def save_last_folder(self, folder_path):
         app_config_file = os.path.join(self.app_data_dir, 'app_config.json')
@@ -457,8 +398,8 @@ class BaseVideoPlayer(QMainWindow):
                 print(f"Errore nel caricamento dell'ultima cartella: {e}")
 
     def load_video_and_data(self, video_filePath, csv_filePaths):
-        # csv_filePaths[0] should be the right foot CSV file
-        # csv_filePaths[1] should be the left foot CSV file
+        import random
+        # csv_filePaths[0] is assigned to the right foot, csv_filePaths[1] to the left foot
         self.csv_filePaths = csv_filePaths.copy()
 
         # Close current video if any
@@ -693,7 +634,7 @@ class BaseVideoPlayer(QMainWindow):
         else:
             markers = sorted(self.step_markers_left)
 
-        # Add markers as lines (always shown)
+        # Add markers as lines regardless of the toggle (since markers are always shown)
         for timestamp in markers:
             line = pg.InfiniteLine(pos=timestamp, angle=90, pen=pg.mkPen(color='yellow', style=Qt.DashLine))
             plot_widget.addItem(line)
@@ -750,13 +691,20 @@ class BaseVideoPlayer(QMainWindow):
             pass
 
     def toggle_step_visualization(self):
-        # Update the flag
+        # Toggle the boolean flag
         self.show_steps = not self.show_steps
-        # Update graphs to show or hide steps
+        # Update the text of the action
         for plot_widget, _, _, _ in self.plot_widgets:
             self.update_step_markers(plot_widget)
+            self.update_toggle_steps_action(plot_widget)
         # Save updated configuration
         self.save_config()
+
+    def update_toggle_steps_action(self, plot_widget):
+        if self.show_steps:
+            plot_widget.toggle_steps_action.setText("Disattiva Visualizzazione Passi")
+        else:
+            plot_widget.toggle_steps_action.setText("Attiva Visualizzazione Passi")
 
     def toggle_synchronization(self):
         if self.sync_state is None:
@@ -894,6 +842,7 @@ class BaseVideoPlayer(QMainWindow):
             self.step_markers_left = []
             # Reset steps visualization
             self.show_steps = True
+            # Save configuration
             self.save_config()
             QMessageBox.information(self, "Impostazioni Reimpostate", "Le impostazioni sono state reimpostate ai valori predefiniti.")
 
@@ -1079,11 +1028,11 @@ class BaseVideoPlayer(QMainWindow):
         remove_marker_action.setVisible(False)
         view_box.menu.addAction(remove_marker_action)
 
-        # Add action to toggle step visualization
-        toggle_steps_action = QAction("", plot_widget)
-        toggle_steps_action.triggered.connect(self.toggle_step_visualization)
-        view_box.menu.addAction(toggle_steps_action)
-        plot_widget.toggle_steps_action = toggle_steps_action  # Store for later updates
+        # Action to toggle step visualization
+        plot_widget.toggle_steps_action = QAction("Disattiva Visualizzazione Passi" if self.show_steps else "Attiva Visualizzazione Passi", plot_widget)
+        plot_widget.toggle_steps_action.triggered.connect(self.toggle_step_visualization)
+        view_box.menu.addSeparator()
+        view_box.menu.addAction(plot_widget.toggle_steps_action)
 
         # Store actions for later use
         plot_widget.remove_marker_action = remove_marker_action
@@ -1140,10 +1089,7 @@ class BaseVideoPlayer(QMainWindow):
                 plot_widget.remove_marker_action.setVisible(False)
 
         # Update the text of the toggle steps action
-        if self.show_steps:
-            plot_widget.toggle_steps_action.setText("Nascondi Passi")
-        else:
-            plot_widget.toggle_steps_action.setText("Visualizza Passi")
+        self.update_toggle_steps_action(plot_widget)
 
     def select_datapoints(self, plot_widget):
         # Create a dialog with checkboxes for each column
@@ -1398,8 +1344,7 @@ class BaseVideoPlayer(QMainWindow):
             self.apply_theme()
 
             # Set steps visualization preference
-            show_steps = self.config.get('show_steps', True)
-            self.show_steps = show_steps
+            self.show_steps = self.config.get('show_steps', True)
 
             # Update graphs AFTER loading step markers and selected columns
             self.update_selected_columns()
