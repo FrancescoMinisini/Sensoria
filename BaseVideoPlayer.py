@@ -23,7 +23,7 @@ class BaseVideoPlayer(QMainWindow):
         self.setFocusPolicy(Qt.StrongFocus)
 
         # Application icon
-        self.setWindowIcon(QIcon('app_icon.png'))  # Ensure 'app_icon.png' exists
+        self.setWindowIcon(QIcon('app_icon.png'))  # Assicurati che 'app_icon.png' esista
 
         # Theme variable (default 'dark')
         self.theme = 'dark'
@@ -35,7 +35,7 @@ class BaseVideoPlayer(QMainWindow):
         self.config = {}
 
         # Application data directories
-        self.app_name = 'DVSS'  # Replace with your app name
+        self.app_name = 'DVSS'  # Sostituisci con il nome della tua app
         self.app_data_dir = user_data_dir(self.app_name)
         self.app_cache_dir = user_cache_dir(self.app_name)
 
@@ -44,11 +44,16 @@ class BaseVideoPlayer(QMainWindow):
         os.makedirs(self.app_cache_dir, exist_ok=True)
 
         # Variables for step markers
-        self.step_markers = []  # List of step marker timestamps
+        self.step_markers_right = []  # List of step markers for right foot
+        self.step_markers_left = []   # List of step markers for left foot
+
+        # Variable to track if steps are visible
+        self.show_steps = True  # Steps are visible by default
 
         # Central widget and layout
         self.central_widget = QWidget(self)
         self.setCentralWidget(self.central_widget)
+        self.setFocus()
 
         # Initialize UI components
         self.setup_ui()
@@ -83,6 +88,11 @@ class BaseVideoPlayer(QMainWindow):
         switch_csv_action = QAction('Scambia File CSV', self)
         switch_csv_action.triggered.connect(self.switch_csv_files)
         self.file_menu.addAction(switch_csv_action)
+
+        # Generate CSV for Steps action
+        generate_csv_action = QAction('Genera CSV per Passi', self)
+        generate_csv_action.triggered.connect(self.generate_csv_for_steps)
+        self.file_menu.addAction(generate_csv_action)
 
         # Options menu
         self.options_menu = self.menu_bar.addMenu('Opzioni')
@@ -184,13 +194,13 @@ class BaseVideoPlayer(QMainWindow):
         self.control_layout.addWidget(self.sync_button)
 
         # Button to cancel synchronization (will replace sync_button during synchronization)
-        self.cancel_sync_button = QPushButton("Cancel Sync")
+        self.cancel_sync_button = QPushButton("Annulla Sync")
         self.cancel_sync_button.setToolTip("Clicca per annullare la sincronizzazione.")
         self.cancel_sync_button.clicked.connect(self.toggle_synchronization)
         self.cancel_sync_button.hide()  # Hidden by default
 
         # Button to set synchronization point (will replace 'Aggiungi Marker Passo' during synchronization)
-        self.set_sync_point_button = QPushButton("Imposta Punto Sync")
+        self.set_sync_point_button = QPushButton("Imposta Punto di Sync")
         self.set_sync_point_button.setToolTip("Clicca per impostare il punto di sincronizzazione.")
         self.set_sync_point_button.clicked.connect(self.set_sync_point_video)
         self.set_sync_point_button.hide()  # Hidden by default
@@ -198,7 +208,7 @@ class BaseVideoPlayer(QMainWindow):
         # Button to add step marker
         self.add_step_marker_button = QPushButton("Aggiungi Marker Passo")
         self.add_step_marker_button.setToolTip("Clicca per aggiungere un marker al timestamp corrente.")
-        self.add_step_marker_button.clicked.connect(self.add_step_marker)
+        self.add_step_marker_button.clicked.connect(lambda: self.add_step_marker())
         self.control_layout.addWidget(self.add_step_marker_button)
 
         # Spacer
@@ -546,6 +556,8 @@ class BaseVideoPlayer(QMainWindow):
         # Update file names in configuration
         self.config['right_csv'] = os.path.basename(self.csv_filePaths[0])
         self.config['left_csv'] = os.path.basename(self.csv_filePaths[1])
+        # Swap step markers
+        self.step_markers_left, self.step_markers_right = self.step_markers_right, self.step_markers_left
         # Update graphs
         self.update_plot_widgets()
         # Save updated configuration
@@ -655,26 +667,102 @@ class BaseVideoPlayer(QMainWindow):
                     moving_points[point_idx].setData([x], [y])
                     point_idx += 1
 
-            # Update step markers
+            # Update step markers and regions
             self.update_step_markers(plot_widget)
 
     def update_step_markers(self, plot_widget):
-        # Remove existing markers
+        # Remove existing markers and regions
         for line in plot_widget.step_marker_lines:
             plot_widget.removeItem(line)
         plot_widget.step_marker_lines = []
 
-        # Add new markers
-        for timestamp in self.step_markers:
+        for region in plot_widget.step_regions:
+            plot_widget.removeItem(region)
+        plot_widget.step_regions = []
+
+        for label in plot_widget.step_labels:
+            plot_widget.removeItem(label)
+        plot_widget.step_labels = []
+
+        # Determine which foot this plot_widget represents
+        foot = plot_widget.foot  # 'right' or 'left'
+
+        # Select the appropriate step markers
+        if foot == 'right':
+            markers = sorted(self.step_markers_right)
+        else:
+            markers = sorted(self.step_markers_left)
+
+        # Add markers as lines (always shown)
+        for timestamp in markers:
             line = pg.InfiniteLine(pos=timestamp, angle=90, pen=pg.mkPen(color='yellow', style=Qt.DashLine))
             plot_widget.addItem(line)
             plot_widget.step_marker_lines.append(line)
+
+        # Check if step visualization is enabled
+        if self.show_steps:
+            # Add new regions and labels
+            if markers:
+                # If the first marker is not at time zero, add zero as the starting point
+                if markers[0] > 0:
+                    markers.insert(0, 0)
+
+                # Add regions between markers
+                for i in range(len(markers) - 1):
+                    start_time = markers[i]
+                    end_time = markers[i + 1]
+
+                    # Create a semi-transparent colored region
+                    color = (255, 0, 0, 50) if foot == 'right' else (0, 0, 255, 50)
+                    region = pg.LinearRegionItem(values=(start_time, end_time), brush=pg.mkBrush(color=color))
+                    plot_widget.addItem(region)
+                    plot_widget.step_regions.append(region)
+
+                    # Add step number label
+                    label_pos = (start_time + end_time) / 2
+                    y_min, y_max = plot_widget.getAxis('left').range
+                    label = pg.TextItem(text=f"Passo {i+1}", color='w', anchor=(0.5, 1))
+                    label.setPos(label_pos, y_max)
+                    plot_widget.addItem(label)
+                    plot_widget.step_labels.append(label)
+
+                # Handle data after the last marker
+                last_marker = markers[-1]
+                data_max_time = plot_widget.data['VideoTime'].max()
+                if last_marker < data_max_time:
+                    start_time = last_marker
+                    end_time = data_max_time
+
+                    color = (255, 0, 0, 50) if foot == 'right' else (0, 0, 255, 50)
+                    region = pg.LinearRegionItem(values=(start_time, end_time), brush=pg.mkBrush(color=color))
+                    plot_widget.addItem(region)
+                    plot_widget.step_regions.append(region)
+
+                    # Add step number label
+                    label_pos = (start_time + end_time) / 2
+                    y_min, y_max = plot_widget.getAxis('left').range
+                    label = pg.TextItem(text=f"Passo {len(markers)}", color='w', anchor=(0.5, 1))
+                    label.setPos(label_pos, y_max)
+                    plot_widget.addItem(label)
+                    plot_widget.step_labels.append(label)
+        else:
+            # Steps visualization is disabled; do not add regions and labels
+            pass
+
+    def toggle_step_visualization(self):
+        # Update the flag
+        self.show_steps = not self.show_steps
+        # Update graphs to show or hide steps
+        for plot_widget, _, _, _ in self.plot_widgets:
+            self.update_step_markers(plot_widget)
+        # Save updated configuration
+        self.save_config()
 
     def toggle_synchronization(self):
         if self.sync_state is None:
             # Start synchronization
             self.sync_state = "video"
-            self.sync_status_label.setText("Naviga al frame desiderato e clicca 'Imposta Punto di Sync'")
+            self.sync_status_label.setText("Sincronizzazione: Naviga al frame desiderato e clicca 'Imposta Punto di Sync'")
             self.sync_status_label.show()
             # Replace 'Sincronizza' button with 'Annulla Sync' button
             self.control_layout.removeWidget(self.sync_button)
@@ -712,7 +800,7 @@ class BaseVideoPlayer(QMainWindow):
             # Save current video timestamp as synchronization point
             self.sync_video_time = self.video_timestamps[self.current_frame]
             self.sync_state = "data"
-            self.sync_status_label.setText("Clicca sul grafico per impostare il punto di sincronizzazione dei dati")
+            self.sync_status_label.setText("Sincronizzazione: Clicca sul grafico per impostare il punto di sincronizzazione dei dati")
             QApplication.setOverrideCursor(QCursor(Qt.CrossCursor))
             # Activate data point selection mode
             for idx, (plot_widget, _, _, _) in enumerate(self.plot_widgets):
@@ -802,7 +890,10 @@ class BaseVideoPlayer(QMainWindow):
                 checkbox.setChecked(False)
             self.update_selected_columns()
             # Reset step markers
-            self.step_markers = []
+            self.step_markers_right = []
+            self.step_markers_left = []
+            # Reset steps visualization
+            self.show_steps = True
             self.save_config()
             QMessageBox.information(self, "Impostazioni Reimpostate", "Le impostazioni sono state reimpostate ai valori predefiniti.")
 
@@ -909,25 +1000,25 @@ class BaseVideoPlayer(QMainWindow):
 
         # Update graphs for right foot
         if "Accelerazioni Dx (Ax, Ay, Az)" in self.selected_columns:
-            self.create_plot_widget(["Ax", "Ay", "Az"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right)
+            self.create_plot_widget(["Ax", "Ay", "Az"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right, 'right')
 
         if "Giroscopio Dx (Gx, Gy, Gz)" in self.selected_columns:
-            self.create_plot_widget(["Gx", "Gy", "Gz"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right)
+            self.create_plot_widget(["Gx", "Gy", "Gz"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right, 'right')
 
         if "Pressione Dx (S0, S1, S2)" in self.selected_columns:
-            self.create_plot_widget(["S0", "S1", "S2"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right)
+            self.create_plot_widget(["S0", "S1", "S2"], ["#FF0000", "#00FF00", "#0000FF"], self.data_right, 'right')
 
         # Update graphs for left foot
         if "Accelerazioni Sx (Ax, Ay, Az)" in self.selected_columns:
-            self.create_plot_widget(["Ax", "Ay", "Az"], ["#FFA500", "#800080", "#008080"], self.data_left)
+            self.create_plot_widget(["Ax", "Ay", "Az"], ["#FFA500", "#800080", "#008080"], self.data_left, 'left')
 
         if "Giroscopio Sx (Gx, Gy, Gz)" in self.selected_columns:
-            self.create_plot_widget(["Gx", "Gy", "Gz"], ["#FFA500", "#800080", "#008080"], self.data_left)
+            self.create_plot_widget(["Gx", "Gy", "Gz"], ["#FFA500", "#800080", "#008080"], self.data_left, 'left')
 
         if "Pressione Sx (S0, S1, S2)" in self.selected_columns:
-            self.create_plot_widget(["S0", "S1", "S2"], ["#FFA500", "#800080", "#008080"], self.data_left)
+            self.create_plot_widget(["S0", "S1", "S2"], ["#FFA500", "#800080", "#008080"], self.data_left, 'left')
 
-    def create_plot_widget(self, columns, colors, data):
+    def create_plot_widget(self, columns, colors, data, foot):
         plot_widget = pg.PlotWidget()
         if self.theme == 'dark':
             plot_widget.setBackground('#2E2E2E')
@@ -936,6 +1027,9 @@ class BaseVideoPlayer(QMainWindow):
             plot_widget.setBackground('#FFFFFF')
             axis_color = '#000000'
         plot_widget.showGrid(x=True, y=True, alpha=0.3)
+
+        # Store the foot information
+        plot_widget.foot = foot  # 'right' or 'left'
 
         # Create custom Y-axis labels
         ylabel = ", ".join([f"<span style='color: {colors[i]};'>{column}</span>" for i, column in enumerate(columns)])
@@ -954,8 +1048,10 @@ class BaseVideoPlayer(QMainWindow):
         plot_widget.selected_columns = columns.copy()  # Initially, all columns are selected
         plot_widget.colors = colors
 
-        # List for step markers in this plot
+        # Lists for step markers, regions, and labels
         plot_widget.step_marker_lines = []
+        plot_widget.step_regions = []
+        plot_widget.step_labels = []
 
         # Access the ViewBox of the plot
         view_box = plot_widget.getViewBox()
@@ -972,7 +1068,7 @@ class BaseVideoPlayer(QMainWindow):
         add_marker_here_action.triggered.connect(lambda: self.add_marker_here(plot_widget))
 
         add_marker_current_time_action = QAction("Aggiungi Marker al Timestamp Corrente", plot_widget)
-        add_marker_current_time_action.triggered.connect(self.add_step_marker)
+        add_marker_current_time_action.triggered.connect(lambda: self.add_step_marker(plot_widget))
 
         view_box.menu.addAction(add_marker_here_action)
         view_box.menu.addAction(add_marker_current_time_action)
@@ -982,6 +1078,12 @@ class BaseVideoPlayer(QMainWindow):
         remove_marker_action.triggered.connect(lambda: self.remove_marker_here(plot_widget))
         remove_marker_action.setVisible(False)
         view_box.menu.addAction(remove_marker_action)
+
+        # Add action to toggle step visualization
+        toggle_steps_action = QAction("", plot_widget)
+        toggle_steps_action.triggered.connect(self.toggle_step_visualization)
+        view_box.menu.addAction(toggle_steps_action)
+        plot_widget.toggle_steps_action = toggle_steps_action  # Store for later updates
 
         # Store actions for later use
         plot_widget.remove_marker_action = remove_marker_action
@@ -1018,15 +1120,30 @@ class BaseVideoPlayer(QMainWindow):
             mouse_point = vb.mapSceneToView(pos)
             timestamp = mouse_point.x()
 
+            # Determine which foot
+            foot = plot_widget.foot
+
+            # Select the appropriate marker list
+            if foot == 'right':
+                markers = self.step_markers_right
+            else:
+                markers = self.step_markers_left
+
             # Find the nearest marker within a threshold
             threshold = 0.1  # Adjust as needed (in seconds)
-            distances = np.abs(np.array(self.step_markers) - timestamp)
+            distances = np.abs(np.array(markers) - timestamp)
             min_distance = np.min(distances) if len(distances) > 0 else np.inf
 
             if min_distance <= threshold:
                 plot_widget.remove_marker_action.setVisible(True)
             else:
                 plot_widget.remove_marker_action.setVisible(False)
+
+        # Update the text of the toggle steps action
+        if self.show_steps:
+            plot_widget.toggle_steps_action.setText("Nascondi Passi")
+        else:
+            plot_widget.toggle_steps_action.setText("Visualizza Passi")
 
     def select_datapoints(self, plot_widget):
         # Create a dialog with checkboxes for each column
@@ -1087,14 +1204,28 @@ class BaseVideoPlayer(QMainWindow):
         # Update step markers
         self.update_step_markers(plot_widget)
 
-    def add_step_marker(self):
+    def add_step_marker(self, plot_widget=None):
+        # Determine which foot to add the marker to
+        if plot_widget is None:
+            # Default to right foot if no plot_widget is provided
+            foot = 'right'
+        else:
+            foot = plot_widget.foot
+
         # Add current timestamp to the marker list
         current_video_time = self.video_timestamps[self.current_frame]
         synced_time = current_video_time - self.sync_offset
-        self.step_markers.append(synced_time)
+
+        if foot == 'right':
+            self.step_markers_right.append(synced_time)
+        else:
+            self.step_markers_left.append(synced_time)
+
         # Update graphs to show the new marker
-        for plot_widget, _, _, _ in self.plot_widgets:
-            self.update_step_markers(plot_widget)
+        for pw, _, _, _ in self.plot_widgets:
+            if pw.foot == foot:
+                self.update_step_markers(pw)
+
         # Save updated configuration
         self.save_config()
 
@@ -1105,11 +1236,19 @@ class BaseVideoPlayer(QMainWindow):
         vb = plot_widget.plotItem.vb
         mouse_point = vb.mapSceneToView(pos)
         timestamp = mouse_point.x()
+
+        # Determine which foot
+        foot = plot_widget.foot
+
         # Add marker at the timestamp
-        self.step_markers.append(timestamp)
+        if foot == 'right':
+            self.step_markers_right.append(timestamp)
+        else:
+            self.step_markers_left.append(timestamp)
+
         # Update graphs to show the new marker
-        for pw, _, _, _ in self.plot_widgets:
-            self.update_step_markers(pw)
+        self.update_step_markers(plot_widget)
+
         # Save updated configuration
         self.save_config()
 
@@ -1121,18 +1260,26 @@ class BaseVideoPlayer(QMainWindow):
         mouse_point = vb.mapSceneToView(pos)
         timestamp = mouse_point.x()
 
+        # Determine which foot
+        foot = plot_widget.foot
+
+        # Select the appropriate marker list
+        if foot == 'right':
+            markers = self.step_markers_right
+        else:
+            markers = self.step_markers_left
+
         # Find the nearest marker within a threshold
         threshold = 0.1  # Adjust as needed (in seconds)
-        distances = np.abs(np.array(self.step_markers) - timestamp)
+        distances = np.abs(np.array(markers) - timestamp)
         min_distance = np.min(distances) if len(distances) > 0 else np.inf
 
         if min_distance <= threshold:
             idx_to_remove = np.argmin(distances)
             # Remove the marker
-            del self.step_markers[idx_to_remove]
+            del markers[idx_to_remove]
             # Update graphs
-            for pw, _, _, _ in self.plot_widgets:
-                self.update_step_markers(pw)
+            self.update_step_markers(plot_widget)
             # Save updated configuration
             self.save_config()
         else:
@@ -1216,7 +1363,8 @@ class BaseVideoPlayer(QMainWindow):
                 self.load_and_preprocess_data(self.csv_filePaths[0], self.csv_filePaths[1])
 
             # Load step markers AFTER loading data
-            self.step_markers = self.config.get('step_markers', [])
+            self.step_markers_right = self.config.get('step_markers_right', [])
+            self.step_markers_left = self.config.get('step_markers_left', [])
 
             # Set settings from configuration
             self.sync_offset = float(self.config.get('sync_offset', 0.0))
@@ -1249,12 +1397,17 @@ class BaseVideoPlayer(QMainWindow):
             self.theme = self.config.get('theme', 'dark')
             self.apply_theme()
 
+            # Set steps visualization preference
+            show_steps = self.config.get('show_steps', True)
+            self.show_steps = show_steps
+
             # Update graphs AFTER loading step markers and selected columns
             self.update_selected_columns()
             self.update_graphs()
         else:
             self.config = {}
-            self.step_markers = []
+            self.step_markers_right = []
+            self.step_markers_left = []
 
     def save_config(self):
         config_file = self.get_config_file_path()
@@ -1268,7 +1421,10 @@ class BaseVideoPlayer(QMainWindow):
         # Save current theme
         self.config['theme'] = self.theme
         # Save step markers
-        self.config['step_markers'] = self.step_markers
+        self.step_markers_right = self.config['step_markers_right'] = self.step_markers_right
+        self.step_markers_left = self.config['step_markers_left'] = self.step_markers_left
+        # Save steps visualization preference
+        self.config['show_steps'] = self.show_steps
         # Convert all values to standard types to avoid JSON issues
         def convert_types(obj):
             if isinstance(obj, dict):
@@ -1300,4 +1456,69 @@ class BaseVideoPlayer(QMainWindow):
         if sensor_rate is None:
             raise ValueError("SamplingFrequency non trovato nell'header del file.")
         return sensor_rate
+
+    def generate_csv_for_steps(self):
+        if not self.step_markers_right and not self.step_markers_left:
+            QMessageBox.warning(self, "Nessun Marker", "Non ci sono marker per generare i CSV dei passi.")
+            return
+
+        # Create main folder
+        steps_folder = os.path.join(self.folder_path, 'Passi')
+        os.makedirs(steps_folder, exist_ok=True)
+
+        # Create subfolders for right and left foot
+        right_folder = os.path.join(steps_folder, 'Piede_Destro')
+        left_folder = os.path.join(steps_folder, 'Piede_Sinistro')
+        os.makedirs(right_folder, exist_ok=True)
+        os.makedirs(left_folder, exist_ok=True)
+
+        # Generate CSV files for right foot
+        if self.step_markers_right:
+            markers_right_sorted = sorted(self.step_markers_right)
+            # If the first marker is not at time zero, add zero as the starting point
+            if markers_right_sorted[0] > 0:
+                markers_right_sorted.insert(0, 0)
+            for i in range(len(markers_right_sorted) - 1):
+                start_time = markers_right_sorted[i]
+                end_time = markers_right_sorted[i + 1]
+                # Extract data between start_time and end_time
+                data_segment = self.data_right[(self.data_right['VideoTime'] >= start_time) & (self.data_right['VideoTime'] <= end_time)]
+                if not data_segment.empty:
+                    # Save to CSV
+                    filename = os.path.join(right_folder, f'Passo_{i+1}.csv')
+                    data_segment.to_csv(filename, index=False)
+            # Handle data after the last marker
+            last_marker = markers_right_sorted[-1]
+            data_segment = self.data_right[self.data_right['VideoTime'] >= last_marker]
+            if not data_segment.empty:
+                filename = os.path.join(right_folder, f'Passo_{len(markers_right_sorted)}.csv')
+                data_segment.to_csv(filename, index=False)
+        else:
+            QMessageBox.information(self, "Nessun Marker Piede Destro", "Non ci sono marker per il piede destro.")
+
+        # Generate CSV files for left foot
+        if self.step_markers_left:
+            markers_left_sorted = sorted(self.step_markers_left)
+            # If the first marker is not at time zero, add zero as the starting point
+            if markers_left_sorted[0] > 0:
+                markers_left_sorted.insert(0, 0)
+            for i in range(len(markers_left_sorted) - 1):
+                start_time = markers_left_sorted[i]
+                end_time = markers_left_sorted[i + 1]
+                # Extract data between start_time and end_time
+                data_segment = self.data_left[(self.data_left['VideoTime'] >= start_time) & (self.data_left['VideoTime'] <= end_time)]
+                if not data_segment.empty:
+                    # Save to CSV
+                    filename = os.path.join(left_folder, f'Passo_{i+1}.csv')
+                    data_segment.to_csv(filename, index=False)
+            # Handle data after the last marker
+            last_marker = markers_left_sorted[-1]
+            data_segment = self.data_left[self.data_left['VideoTime'] >= last_marker]
+            if not data_segment.empty:
+                filename = os.path.join(left_folder, f'Passo_{len(markers_left_sorted)}.csv')
+                data_segment.to_csv(filename, index=False)
+        else:
+            QMessageBox.information(self, "Nessun Marker Piede Sinistro", "Non ci sono marker per il piede sinistro.")
+
+        QMessageBox.information(self, "Operazione Completa", "I file CSV dei passi sono stati generati con successo.")
 
