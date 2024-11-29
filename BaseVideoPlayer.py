@@ -6,10 +6,11 @@ import pandas as pd
 import json
 import hashlib
 import random
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QPointF
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, QPointF, QRectF
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
                              QSplitter, QPushButton, QCheckBox, QSizePolicy, QApplication,
-                             QAction, QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox, QListWidget, QGridLayout)
+                             QAction, QFileDialog, QMessageBox, QComboBox, QDialog, QDialogButtonBox, QListWidget, QGridLayout,
+                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
 from PyQt5.QtGui import QPixmap, QImage, QIcon, QCursor
 import pyqtgraph as pg
 from platformdirs import user_data_dir, user_cache_dir
@@ -142,11 +143,11 @@ class BaseVideoPlayer(QMainWindow):
         self.video_layout.setContentsMargins(0, 0, 0, 0)
         self.video_layout.setSpacing(0)
 
-        # Video display label
-        self.video_label = QLabel(self.video_widget)
-        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_layout.addWidget(self.video_label, 0, 0)
+        # Graphics scene and view for video display
+        self.graphics_scene = QGraphicsScene()
+        self.graphics_view = QGraphicsView(self.graphics_scene, self.video_widget)
+        self.graphics_view.setAlignment(Qt.AlignCenter)
+        self.video_layout.addWidget(self.graphics_view, 0, 0)
 
         # Message to open a folder
         self.open_folder_label = QLabel("Per favore, apri una cartella per iniziare", self.video_widget)
@@ -277,6 +278,44 @@ class BaseVideoPlayer(QMainWindow):
         # Apply theme to foot labels
         self.update_foot_labels_theme()
 
+        # Variables for video scaling
+        self.zoom_factor = 1.0
+        self.graphics_view.setTransformationAnchor(QGraphicsView.NoAnchor)
+        self.graphics_view.setResizeAnchor(QGraphicsView.NoAnchor)
+        self.graphics_view.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.graphics_view.viewport().installEventFilter(self)
+        self.graphics_view.setMouseTracking(True)
+        # Disabilita le barre di scorrimento
+        self.graphics_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.graphics_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+    def eventFilter(self, source, event):
+        if event.type() == event.Wheel and source is self.graphics_view.viewport():
+            self.handle_zoom(event)
+            return True
+        return super().eventFilter(source, event)
+
+    def handle_zoom(self, event):
+        zoom_in_factor = 1.25
+        zoom_out_factor = 1 / zoom_in_factor
+
+        # Save the scene pos
+        old_pos = self.graphics_view.mapToScene(event.pos())
+
+        # Zoom
+        if event.angleDelta().y() > 0:
+            zoom_factor = zoom_in_factor
+        else:
+            zoom_factor = zoom_out_factor
+        self.graphics_view.scale(zoom_factor, zoom_factor)
+
+        # Get the new position
+        new_pos = self.graphics_view.mapToScene(event.pos())
+
+        # Move scene to old position
+        delta = new_pos - old_pos
+        self.graphics_view.translate(delta.x(), delta.y())
+
     def apply_theme(self):
         if self.theme == 'dark':
             self.setStyleSheet(self.get_dark_stylesheet())
@@ -398,7 +437,6 @@ class BaseVideoPlayer(QMainWindow):
                 print(f"Errore nel caricamento dell'ultima cartella: {e}")
 
     def load_video_and_data(self, video_filePath, csv_filePaths):
-        import random
         # csv_filePaths[0] is assigned to the right foot, csv_filePaths[1] to the left foot
         self.csv_filePaths = csv_filePaths.copy()
 
@@ -567,7 +605,13 @@ class BaseVideoPlayer(QMainWindow):
         h, w, ch = frame.shape
         bytes_per_line = ch * w
         qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        self.video_label.setPixmap(QPixmap.fromImage(qt_image))
+        pixmap = QPixmap.fromImage(qt_image)
+
+        # Clear the scene and add the new frame
+        self.graphics_scene.clear()
+        self.pixmap_item = self.graphics_scene.addPixmap(pixmap)
+        self.graphics_scene.setSceneRect(QRectF(pixmap.rect()))
+
         self.update_frame_counter()
 
     def update_frame_counter(self):
