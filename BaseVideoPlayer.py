@@ -29,7 +29,7 @@ class BaseVideoPlayer(QMainWindow):
         self.setFocusPolicy(Qt.StrongFocus)
 
         # Application icon
-        self.setWindowIcon(QIcon('app_icon.png'))  # Assicurati che esista
+        self.setWindowIcon(QIcon('app_icon.png'))  # Ensure this file exists
 
         # Theme variable (default 'dark')
         self.theme = 'dark'
@@ -41,7 +41,7 @@ class BaseVideoPlayer(QMainWindow):
         self.config = {}
 
         # Application data directories
-        self.app_name = 'DVSS'  # Sostituisci con il nome della tua app
+        self.app_name = 'DVSS'  # Replace with your app name
         self.app_data_dir = user_data_dir(self.app_name)
         self.app_cache_dir = user_cache_dir(self.app_name)
 
@@ -52,6 +52,10 @@ class BaseVideoPlayer(QMainWindow):
         # Variables for step markers
         self.step_markers_right = []  # List of step markers for right foot
         self.step_markers_left = []   # List of step markers for left foot
+
+        # Variables for emiciclo markers (half-step markers)
+        self.emiciclo_markers_right = []  # List of emiciclo markers for right foot
+        self.emiciclo_markers_left = []   # List of emiciclo markers for left foot
 
         # Variable to track if steps are visible
         self.show_steps = True  # Steps are visible by default
@@ -322,7 +326,7 @@ class BaseVideoPlayer(QMainWindow):
         self.graphics_view.setDragMode(QGraphicsView.ScrollHandDrag)
         self.graphics_view.viewport().installEventFilter(self)
         self.graphics_view.setMouseTracking(True)
-        # Disabilita le barre di scorrimento
+        # Disable scrollbars
         self.graphics_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.graphics_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
@@ -423,7 +427,7 @@ class BaseVideoPlayer(QMainWindow):
 
     def open_files(self):
         folder_path = QFileDialog.getExistingDirectory(self, "Seleziona "
-                                                           "Cartella", "")
+                                                               "Cartella", "")
         if folder_path:
             self.open_folder(folder_path)
 
@@ -585,6 +589,9 @@ class BaseVideoPlayer(QMainWindow):
         # Swap step markers
         self.step_markers_left, self.step_markers_right = \
             self.step_markers_right, self.step_markers_left
+        # Swap emiciclo markers
+        self.emiciclo_markers_left, self.emiciclo_markers_right = \
+            self.emiciclo_markers_right, self.emiciclo_markers_left
         # Update graphs
         self.update_plot_widgets()
         # Save updated configuration
@@ -686,10 +693,10 @@ class BaseVideoPlayer(QMainWindow):
         self.timer.start(int(1000 / (self.video_fps * self.playback_speed)))
 
     def update_graphs(self):
-        # Calcola il timestamp corrente del video considerando l'offset
+        # Calculate current video timestamp considering the offset
         current_video_time = self.video_timestamps[self.current_frame]
 
-        # Applica l'offset di sincronizzazione
+        # Apply synchronization offset
         synced_time = current_video_time - self.sync_offset
 
         for i, (plot_widget, moving_points, columns, data) in enumerate(
@@ -702,7 +709,7 @@ class BaseVideoPlayer(QMainWindow):
 
             x = data['VideoTime'].values[closest_index]
 
-            # Aggiorna i moving points per le colonne selezionate
+            # Update moving points for selected columns
             point_idx = 0
             for j, column in enumerate(plot_widget.all_columns):
                 if column in plot_widget.selected_columns:
@@ -710,49 +717,62 @@ class BaseVideoPlayer(QMainWindow):
                     moving_points[point_idx].setData([x], [y])
                     point_idx += 1
 
-            # Non chiamare update_step_markers qui
+            # Do not call update_markers here
 
-    def update_step_markers(self, plot_widget):
-        # Rimuovi marker esistenti
-        for line in plot_widget.step_marker_lines:
+    def update_markers(self, plot_widget):
+        # Remove existing markers
+        for line in plot_widget.step_marker_lines + plot_widget.emiciclo_marker_lines:
             plot_widget.removeItem(line)
         plot_widget.step_marker_lines = []
+        plot_widget.emiciclo_marker_lines = []
 
-        for region in plot_widget.step_regions:
+        for region in plot_widget.step_regions + plot_widget.emiciclo_regions:
             plot_widget.removeItem(region)
         plot_widget.step_regions = []
+        plot_widget.emiciclo_regions = []
 
-        for label in plot_widget.step_labels:
+        for label in plot_widget.step_labels + plot_widget.emiciclo_labels:
             plot_widget.removeItem(label)
         plot_widget.step_labels = []
+        plot_widget.emiciclo_labels = []
 
-        # Determina quale piede rappresenta il plot_widget
-        foot = plot_widget.foot  # 'right' o 'left'
+        # Determine which foot this plot_widget represents
+        foot = plot_widget.foot  # 'right' or 'left'
 
-        # Seleziona i marker di passo appropriati
+        # Select the appropriate step markers
         if foot == 'right':
-            markers = sorted(self.step_markers_right)
+            step_markers = sorted(self.step_markers_right)
+            emiciclo_markers = sorted(self.emiciclo_markers_right)
         else:
-            markers = sorted(self.step_markers_left)
+            step_markers = sorted(self.step_markers_left)
+            emiciclo_markers = sorted(self.emiciclo_markers_left)
 
-        # Aggiungi marker come linee
-        for timestamp in markers:
+        # Add step markers as lines
+        for timestamp in step_markers:
             line = pg.InfiniteLine(pos=timestamp, angle=90,
                                    pen=pg.mkPen(color='yellow',
-                                                style=Qt.DashLine))
+                                                style=Qt.DashLine, width=2))
             plot_widget.addItem(line)
             plot_widget.step_marker_lines.append(line)
 
-        # Aggiungi regioni e etichette solo se la visualizzazione dei passi
-        # è attiva
-        if self.show_steps:
-            if markers:
-                if markers[0] > 0:
-                    markers.insert(0, 0)
+        # Add emiciclo markers as lines (different style)
+        for timestamp in emiciclo_markers:
+            line = pg.InfiniteLine(pos=timestamp, angle=90,
+                                   pen=pg.mkPen(color='green',
+                                                style=Qt.DashDotLine, width=2))
+            plot_widget.addItem(line)
+            plot_widget.emiciclo_marker_lines.append(line)
 
-                for i in range(len(markers) - 1):
-                    start_time = markers[i]
-                    end_time = markers[i + 1]
+        # Add regions and labels for steps if visualization is enabled
+        if self.show_steps:
+            # Steps
+            if step_markers:
+                if step_markers[0] > 0:
+                    step_markers.insert(0, 0)
+
+                for i in range(len(step_markers) - 1):
+                    start_time = step_markers[i]
+                    end_time = step_markers[i + 1]
 
                     color = (255, 0, 0, 50) if foot == 'right' else \
                             (0, 0, 255, 50)
@@ -770,7 +790,7 @@ class BaseVideoPlayer(QMainWindow):
                     plot_widget.addItem(label)
                     plot_widget.step_labels.append(label)
 
-                last_marker = markers[-1]
+                last_marker = step_markers[-1]
                 data_max_time = plot_widget.data['VideoTime'].max()
                 if last_marker < data_max_time:
                     start_time = last_marker
@@ -786,21 +806,21 @@ class BaseVideoPlayer(QMainWindow):
 
                     label_pos = (start_time + end_time) / 2
                     y_min, y_max = plot_widget.getAxis('left').range
-                    label = pg.TextItem(text=f"Passo {len(markers)}", color='w',
-                                        anchor=(0.5, 1))
+                    label = pg.TextItem(text=f"Passo {len(step_markers)}",
+                                        color='w', anchor=(0.5, 1))
                     label.setPos(label_pos, y_max)
                     plot_widget.addItem(label)
                     plot_widget.step_labels.append(label)
-        else:
-            # Steps visualization is disabled; do not add regions and labels
-            pass
+
+            # Note: Removed the code that adds green regions between emiciclo markers
+            # as per your request.
 
     def toggle_step_visualization(self):
         # Toggle the boolean flag
         self.show_steps = not self.show_steps
         # Update the text of the action
         for plot_widget, _, _, _ in self.plot_widgets:
-            self.update_step_markers(plot_widget)
+            self.update_markers(plot_widget)
             self.update_toggle_steps_action(plot_widget)
         # Save updated configuration
         self.save_config()
@@ -961,6 +981,9 @@ class BaseVideoPlayer(QMainWindow):
             # Reset step markers
             self.step_markers_right = []
             self.step_markers_left = []
+            # Reset emiciclo markers
+            self.emiciclo_markers_right = []
+            self.emiciclo_markers_left = []
             # Reset steps visualization
             self.show_steps = True
             # Save configuration
@@ -1151,6 +1174,11 @@ class BaseVideoPlayer(QMainWindow):
         plot_widget.step_regions = []
         plot_widget.step_labels = []
 
+        # Lists for emiciclo markers, regions, and labels
+        plot_widget.emiciclo_marker_lines = []
+        plot_widget.emiciclo_regions = []
+        plot_widget.emiciclo_labels = []
+
         # Access the ViewBox of the plot
         view_box = plot_widget.getViewBox()
 
@@ -1172,8 +1200,20 @@ class BaseVideoPlayer(QMainWindow):
         add_marker_current_time_action.triggered.connect(
             lambda: self.add_step_marker(plot_widget))
 
+        # Add context menu options for emiciclo markers
+        add_emiciclo_here_action = QAction("Aggiungi Marker Emiciclo Qui", plot_widget)
+        add_emiciclo_here_action.triggered.connect(
+            lambda: self.add_emiciclo_marker_here(plot_widget))
+
+        add_emiciclo_current_time_action = QAction(
+            "Aggiungi Marker Emiciclo al Timestamp Corrente", plot_widget)
+        add_emiciclo_current_time_action.triggered.connect(
+            lambda: self.add_emiciclo_marker(plot_widget))
+
         view_box.menu.addAction(add_marker_here_action)
         view_box.menu.addAction(add_marker_current_time_action)
+        view_box.menu.addAction(add_emiciclo_here_action)
+        view_box.menu.addAction(add_emiciclo_current_time_action)
 
         # Create action for removing marker (hidden by default)
         remove_marker_action = QAction("Rimuovi Marker Qui", plot_widget)
@@ -1181,6 +1221,13 @@ class BaseVideoPlayer(QMainWindow):
             lambda: self.remove_marker_here(plot_widget))
         remove_marker_action.setVisible(False)
         view_box.menu.addAction(remove_marker_action)
+
+        # Create action for removing emiciclo marker (hidden by default)
+        remove_emiciclo_marker_action = QAction("Rimuovi Marker Emiciclo Qui", plot_widget)
+        remove_emiciclo_marker_action.triggered.connect(
+            lambda: self.remove_emiciclo_marker_here(plot_widget))
+        remove_emiciclo_marker_action.setVisible(False)
+        view_box.menu.addAction(remove_emiciclo_marker_action)
 
         # Action to toggle step visualization
         plot_widget.toggle_steps_action = QAction(
@@ -1193,6 +1240,7 @@ class BaseVideoPlayer(QMainWindow):
 
         # Store actions for later use
         plot_widget.remove_marker_action = remove_marker_action
+        plot_widget.remove_emiciclo_marker_action = remove_emiciclo_marker_action
 
         # Connect to aboutToShow signal to update menu before showing
         view_box.menu.aboutToShow.connect(lambda vw=view_box, pw=plot_widget:
@@ -1231,21 +1279,32 @@ class BaseVideoPlayer(QMainWindow):
             # Determine which foot
             foot = plot_widget.foot
 
-            # Select the appropriate marker list
+            # Select the appropriate marker lists
             if foot == 'right':
-                markers = self.step_markers_right
+                step_markers = self.step_markers_right
+                emiciclo_markers = self.emiciclo_markers_right
             else:
-                markers = self.step_markers_left
+                step_markers = self.step_markers_left
+                emiciclo_markers = self.emiciclo_markers_left
 
-            # Find the nearest marker within a threshold
+            # Find the nearest step marker within a threshold
             threshold = 0.1  # Adjust as needed (in seconds)
-            distances = np.abs(np.array(markers) - timestamp)
+            distances = np.abs(np.array(step_markers) - timestamp)
             min_distance = np.min(distances) if len(distances) > 0 else np.inf
 
             if min_distance <= threshold:
                 plot_widget.remove_marker_action.setVisible(True)
             else:
                 plot_widget.remove_marker_action.setVisible(False)
+
+            # Find the nearest emiciclo marker within a threshold
+            distances_emiciclo = np.abs(np.array(emiciclo_markers) - timestamp)
+            min_distance_emiciclo = np.min(distances_emiciclo) if len(distances_emiciclo) > 0 else np.inf
+
+            if min_distance_emiciclo <= threshold:
+                plot_widget.remove_emiciclo_marker_action.setVisible(True)
+            else:
+                plot_widget.remove_emiciclo_marker_action.setVisible(False)
 
         # Update the text of the toggle steps action
         self.update_toggle_steps_action(plot_widget)
@@ -1311,8 +1370,8 @@ class BaseVideoPlayer(QMainWindow):
                                           plot_widget.all_columns, data)
                 break
 
-        # Update step markers
-        self.update_step_markers(plot_widget)
+        # Update markers
+        self.update_markers(plot_widget)
 
     def add_step_marker(self, plot_widget=None):
         # Determine which foot to add the marker to
@@ -1331,14 +1390,14 @@ class BaseVideoPlayer(QMainWindow):
         else:
             self.step_markers_left.append(synced_time)
 
-        # Aggiorna i marker dei passi solo per il plot_widget specifico
+        # Update markers only for the specific plot_widget
         if plot_widget:
-            self.update_step_markers(plot_widget)
+            self.update_markers(plot_widget)
         else:
-            # Aggiorna tutti i plot_widgets
+            # Update all plot_widgets
             for pw, _, _, _ in self.plot_widgets:
                 if pw.foot == foot:
-                    self.update_step_markers(pw)
+                    self.update_markers(pw)
 
         # Save updated configuration
         self.save_config()
@@ -1360,8 +1419,8 @@ class BaseVideoPlayer(QMainWindow):
         else:
             self.step_markers_left.append(timestamp)
 
-        # Aggiorna i marker dei passi solo per il plot_widget specifico
-        self.update_step_markers(plot_widget)
+        # Update markers only for the specific plot_widget
+        self.update_markers(plot_widget)
 
         # Save updated configuration
         self.save_config()
@@ -1392,13 +1451,100 @@ class BaseVideoPlayer(QMainWindow):
             idx_to_remove = np.argmin(distances)
             # Remove the marker
             del markers[idx_to_remove]
-            # Aggiorna i marker dei passi solo per il plot_widget specifico
-            self.update_step_markers(plot_widget)
+            # Update markers only for the specific plot_widget
+            self.update_markers(plot_widget)
             # Save updated configuration
             self.save_config()
         else:
             QMessageBox.information(self, "Nessun Marker Vicino",
                                     "Non ci sono marker vicini alla posizione "
+                                    "selezionata.")
+
+    def add_emiciclo_marker(self, plot_widget=None):
+        # Determine which foot to add the marker to
+        if plot_widget is None:
+            # Default to right foot if no plot_widget is provided
+            foot = 'right'
+        else:
+            foot = plot_widget.foot
+
+        # Add current timestamp to the emiciclo marker list
+        current_video_time = self.video_timestamps[self.current_frame]
+        synced_time = current_video_time - self.sync_offset
+
+        if foot == 'right':
+            self.emiciclo_markers_right.append(synced_time)
+        else:
+            self.emiciclo_markers_left.append(synced_time)
+
+        # Update markers only for the specific plot_widget
+        if plot_widget:
+            self.update_markers(plot_widget)
+        else:
+            # Update all plot_widgets
+            for pw, _, _, _ in self.plot_widgets:
+                if pw.foot == foot:
+                    self.update_markers(pw)
+
+        # Save updated configuration
+        self.save_config()
+
+    def add_emiciclo_marker_here(self, plot_widget):
+        # Get mouse position at the time of context menu invocation
+        pos = self.context_menu_event_pos
+
+        vb = plot_widget.plotItem.vb
+        mouse_point = vb.mapSceneToView(pos)
+        timestamp = mouse_point.x()
+
+        # Determine which foot
+        foot = plot_widget.foot
+
+        # Add emiciclo marker at the timestamp
+        if foot == 'right':
+            self.emiciclo_markers_right.append(timestamp)
+        else:
+            self.emiciclo_markers_left.append(timestamp)
+
+        # Update markers only for the specific plot_widget
+        self.update_markers(plot_widget)
+
+        # Save updated configuration
+        self.save_config()
+
+    def remove_emiciclo_marker_here(self, plot_widget):
+        # Get mouse position at the time of context menu invocation
+        pos = self.context_menu_event_pos
+
+        vb = plot_widget.plotItem.vb
+        mouse_point = vb.mapSceneToView(pos)
+        timestamp = mouse_point.x()
+
+        # Determine which foot
+        foot = plot_widget.foot
+
+        # Select the appropriate emiciclo marker list
+        if foot == 'right':
+            markers = self.emiciclo_markers_right
+        else:
+            markers = self.emiciclo_markers_left
+
+        # Find the nearest emiciclo marker within a threshold
+        threshold = 0.1  # Adjust as needed (in seconds)
+        distances = np.abs(np.array(markers) - timestamp)
+        min_distance = np.min(distances) if len(distances) > 0 else np.inf
+
+        if min_distance <= threshold:
+            idx_to_remove = np.argmin(distances)
+            # Remove the marker
+            del markers[idx_to_remove]
+            # Update markers only for the specific plot_widget
+            self.update_markers(plot_widget)
+            # Save updated configuration
+            self.save_config()
+        else:
+            QMessageBox.information(self, "Nessun Marker Emiciclo Vicino",
+                                    "Non ci sono marker emiciclo vicini alla posizione "
                                     "selezionata.")
 
     @pyqtSlot(object)
@@ -1490,6 +1636,10 @@ class BaseVideoPlayer(QMainWindow):
             self.step_markers_right = self.config.get('step_markers_right', [])
             self.step_markers_left = self.config.get('step_markers_left', [])
 
+            # Load emiciclo markers
+            self.emiciclo_markers_right = self.config.get('emiciclo_markers_right', [])
+            self.emiciclo_markers_left = self.config.get('emiciclo_markers_left', [])
+
             # Set settings from configuration
             self.sync_offset = float(self.config.get('sync_offset', 0.0))
             self.playback_speed = float(self.config.get('playback_speed', 1.0))
@@ -1533,6 +1683,8 @@ class BaseVideoPlayer(QMainWindow):
             self.config = {}
             self.step_markers_right = []
             self.step_markers_left = []
+            self.emiciclo_markers_right = []
+            self.emiciclo_markers_left = []
 
     def save_config(self):
         config_file = self.get_config_file_path()
@@ -1552,6 +1704,11 @@ class BaseVideoPlayer(QMainWindow):
             self.step_markers_right
         self.step_markers_left = self.config['step_markers_left'] = \
             self.step_markers_left
+        # Save emiciclo markers
+        self.emiciclo_markers_right = self.config['emiciclo_markers_right'] = \
+            self.emiciclo_markers_right
+        self.emiciclo_markers_left = self.config['emiciclo_markers_left'] = \
+            self.emiciclo_markers_left
         # Save steps visualization preference
         self.config['show_steps'] = self.show_steps
         # Convert all values to standard types to avoid JSON issues
@@ -1604,60 +1761,229 @@ class BaseVideoPlayer(QMainWindow):
         os.makedirs(right_folder, exist_ok=True)
         os.makedirs(left_folder, exist_ok=True)
 
-        # Generate CSV files for right foot
+        # Create subfolders for steps and half-steps
+        right_steps_folder = os.path.join(right_folder, 'Passi_Interi')
+        right_half_steps_folder = os.path.join(right_folder, 'Mezzi_Passi')
+        os.makedirs(right_steps_folder, exist_ok=True)
+        os.makedirs(right_half_steps_folder, exist_ok=True)
+
+        left_steps_folder = os.path.join(left_folder, 'Passi_Interi')
+        left_half_steps_folder = os.path.join(left_folder, 'Mezzi_Passi')
+        os.makedirs(left_steps_folder, exist_ok=True)
+        os.makedirs(left_half_steps_folder, exist_ok=True)
+
+        # Generate CSV files for right foot steps and half-steps
         if self.step_markers_right:
             markers_right_sorted = sorted(self.step_markers_right)
+            emicicli_right_sorted = sorted(self.emiciclo_markers_right)
             if markers_right_sorted[0] > 0:
                 markers_right_sorted.insert(0, 0)
-            for i in range(len(markers_right_sorted) - 1):
-                start_time = markers_right_sorted[i]
-                end_time = markers_right_sorted[i + 1]
+            step_count = len(markers_right_sorted)
+            for i in range(step_count - 1):
+                step_start = markers_right_sorted[i]
+                step_end = markers_right_sorted[i + 1]
+
+                # Full step
                 data_segment = self.data_right[
-                    (self.data_right['VideoTime'] >= start_time) &
-                    (self.data_right['VideoTime'] <= end_time)]
+                    (self.data_right['VideoTime'] >= step_start) &
+                    (self.data_right['VideoTime'] <= step_end)]
                 if not data_segment.empty:
-                    filename = os.path.join(right_folder,
+                    filename = os.path.join(right_steps_folder,
                                             f'Passo_{i+1}.csv')
                     data_segment.to_csv(filename, index=False)
+
+                # Half-steps
+                # Find emiciclo markers within this step
+                emicicli_in_step = [e for e in emicicli_right_sorted
+                                    if step_start < e < step_end]
+                if emicicli_in_step:
+                    # First half-step
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= step_start) &
+                        (self.data_right['VideoTime'] <= emicicli_in_step[0])]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{i+1}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+
+                    # Second half-step
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= emicicli_in_step[0]) &
+                        (self.data_right['VideoTime'] <= step_end)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{i+1}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
+                else:
+                    # If no emiciclo marker, save the full step as two halves
+                    midpoint = (step_start + step_end) / 2
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= step_start) &
+                        (self.data_right['VideoTime'] <= midpoint)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{i+1}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= midpoint) &
+                        (self.data_right['VideoTime'] <= step_end)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{i+1}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
+
+            # Handle the last step if any
             last_marker = markers_right_sorted[-1]
             data_segment = self.data_right[
                 self.data_right['VideoTime'] >= last_marker]
             if not data_segment.empty:
-                filename = os.path.join(right_folder,
-                                        f'Passo_{len(markers_right_sorted)}'
-                                        f'.csv')
+                filename = os.path.join(right_steps_folder,
+                                        f'Passo_{step_count}.csv')
                 data_segment.to_csv(filename, index=False)
+                # Handle half-steps
+                emicicli_in_step = [e for e in emicicli_right_sorted
+                                    if e > last_marker]
+                if emicicli_in_step:
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= last_marker) &
+                        (self.data_right['VideoTime'] <= emicicli_in_step[0])]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{step_count}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= emicicli_in_step[0])]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{step_count}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
+                else:
+                    # No emiciclo marker in last step
+                    midpoint = last_marker + (data_segment['VideoTime'].max() - last_marker) / 2
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= last_marker) &
+                        (self.data_right['VideoTime'] <= midpoint)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{step_count}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+                    data_half_step = self.data_right[
+                        (self.data_right['VideoTime'] >= midpoint)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(right_half_steps_folder,
+                                                f'Passo{step_count}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
         else:
             QMessageBox.information(self, "Nessun Marker Piede Destro",
                                     "Non ci sono marker per il piede destro.")
 
-        # Generate CSV files for left foot
+        # Generate CSV files for left foot steps and half-steps
         if self.step_markers_left:
             markers_left_sorted = sorted(self.step_markers_left)
+            emicicli_left_sorted = sorted(self.emiciclo_markers_left)
             if markers_left_sorted[0] > 0:
                 markers_left_sorted.insert(0, 0)
-            for i in range(len(markers_left_sorted) - 1):
-                start_time = markers_left_sorted[i]
-                end_time = markers_left_sorted[i + 1]
+            step_count = len(markers_left_sorted)
+            for i in range(step_count - 1):
+                step_start = markers_left_sorted[i]
+                step_end = markers_left_sorted[i + 1]
+
+                # Full step
                 data_segment = self.data_left[
-                    (self.data_left['VideoTime'] >= start_time) &
-                    (self.data_left['VideoTime'] <= end_time)]
+                    (self.data_left['VideoTime'] >= step_start) &
+                    (self.data_left['VideoTime'] <= step_end)]
                 if not data_segment.empty:
-                    filename = os.path.join(left_folder,
+                    filename = os.path.join(left_steps_folder,
                                             f'Passo_{i+1}.csv')
                     data_segment.to_csv(filename, index=False)
+
+                # Half-steps
+                # Find emiciclo markers within this step
+                emicicli_in_step = [e for e in emicicli_left_sorted
+                                    if step_start < e < step_end]
+                if emicicli_in_step:
+                    # First half-step
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= step_start) &
+                        (self.data_left['VideoTime'] <= emicicli_in_step[0])]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{i+1}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+
+                    # Second half-step
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= emicicli_in_step[0]) &
+                        (self.data_left['VideoTime'] <= step_end)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{i+1}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
+                else:
+                    # If no emiciclo marker, save the full step as two halves
+                    midpoint = (step_start + step_end) / 2
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= step_start) &
+                        (self.data_left['VideoTime'] <= midpoint)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{i+1}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= midpoint) &
+                        (self.data_left['VideoTime'] <= step_end)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{i+1}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
+
+            # Handle the last step if any
             last_marker = markers_left_sorted[-1]
             data_segment = self.data_left[
                 self.data_left['VideoTime'] >= last_marker]
             if not data_segment.empty:
-                filename = os.path.join(left_folder,
-                                        f'Passo_{len(markers_left_sorted)}'
-                                        f'.csv')
+                filename = os.path.join(left_steps_folder,
+                                        f'Passo_{step_count}.csv')
                 data_segment.to_csv(filename, index=False)
+                # Handle half-steps
+                emicicli_in_step = [e for e in emicicli_left_sorted
+                                    if e > last_marker]
+                if emicicli_in_step:
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= last_marker) &
+                        (self.data_left['VideoTime'] <= emicicli_in_step[0])]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{step_count}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= emicicli_in_step[0])]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{step_count}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
+                else:
+                    # No emiciclo marker in last step
+                    midpoint = last_marker + (data_segment['VideoTime'].max() - last_marker) / 2
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= last_marker) &
+                        (self.data_left['VideoTime'] <= midpoint)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{step_count}.1.csv')
+                        data_half_step.to_csv(filename, index=False)
+                    data_half_step = self.data_left[
+                        (self.data_left['VideoTime'] >= midpoint)]
+                    if not data_half_step.empty:
+                        filename = os.path.join(left_half_steps_folder,
+                                                f'Passo{step_count}.2.csv')
+                        data_half_step.to_csv(filename, index=False)
         else:
             QMessageBox.information(self, "Nessun Marker Piede Sinistro",
                                     "Non ci sono marker per il piede sinistro.")
 
         QMessageBox.information(self, "Operazione Completa", "I file CSV dei "
-                                "passi sono stati generati con successo.")
+                                "passi e dei mezzi passi sono stati generati con successo.")
 
