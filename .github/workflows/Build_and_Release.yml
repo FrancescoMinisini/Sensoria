@@ -1,0 +1,82 @@
+name: Build-and-Release DVSS
+
+on:
+  # crea i binari e apre la Release ogni volta che fai un tag v*.*.*
+  push:
+    tags:
+      - 'v*.*.*'
+  # permette di avviare il job manualmente dall’interfaccia di GitHub
+  workflow_dispatch:
+
+jobs:
+  build:
+    # due runner separati, uno Windows e uno macOS
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        py: ['3.11']
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout sorgente
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          # se hai già un requirements.txt lascialo così,
+          # altrimenti installa i pacchetti qui sotto
+          pip install -r requirements.txt || \
+          pip install pyqt5 opencv-python-headless numpy pandas pyqtgraph platformdirs
+          pip install pyinstaller
+
+      - name: Costruisci eseguibile con PyInstaller
+        run: |
+          # --windowed evita la console nera su Windows/Mac
+          # --onefile produce un singolo binario
+          # --name DVSS è il nome finale
+          pyinstaller --noconfirm --clean --windowed --onefile \
+            --name DVSS \
+            --add-data "app_icon.png;." \
+            --add-data "play.png;." \
+            main.py
+      - name: Carica l’artefatto (per il job di release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dvss-${{ runner.os }}
+          path: |
+            dist/**        # dist/DVSS.exe (Windows) -- dist/DVSS (Mac)
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Scarica artefatti
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true       # mette insieme windows e mac nella stessa cartella
+
+      - name: Prepara asset per la Release
+        run: |
+          mkdir release
+          # Windows
+          if [ -f "dvss-windows/DVSS.exe" ]; then \
+            mv "dvss-windows/DVSS.exe" "release/DVSS-windows.exe"; fi
+          # macOS: zippiamo l’.app per non perdere l’attributo eseguibile
+          if [ -d "dvss-macos/DVSS.app" ]; then \
+            ditto -c -k --sequesterRsrc --keepParent \
+              "dvss-macos/DVSS.app" "release/DVSS-mac.zip"; fi
+
+      - name: Pubblica GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          files: release/*
