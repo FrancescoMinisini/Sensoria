@@ -42,7 +42,8 @@ jobs:
           # --windowed evita la console nera su Windows/Mac
           # --onefile produce un singolo binario
           # --name DVSS è il nome finale
-          pyinstaller --onefile --windowed --icon=app_icon.ico main.py
+          pyinstaller --onefile --windowed main.py
+        #   pyinstaller --onefile --windowed --icon=app_icon.ico main.py
         #   pyinstaller --noconfirm --clean --windowed --onefile \
         #     --name DVSS \
         #     --add-data "app_icon.png;." \
