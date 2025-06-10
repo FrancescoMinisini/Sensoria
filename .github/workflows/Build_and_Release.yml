@@ -9,7 +9,8 @@ on:
       - 'v*.*.*'
   # permette di avviare il job manualmente dall’interfaccia di GitHub
   workflow_dispatch:
-
+permissions:
+  contents: write 
 jobs:
   build:
     # due runner separati, uno Windows e uno macOS
