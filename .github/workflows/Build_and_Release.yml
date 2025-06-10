@@ -3,6 +3,8 @@ name: Build-and-Release DVSS
 on:
   # crea i binari e apre la Release ogni volta che fai un tag v*.*.*
   push:
+    branches:
+        [main]
     tags:
       - 'v*.*.*'
   # permette di avviare il job manualmente dall’interfaccia di GitHub
@@ -40,11 +42,12 @@ jobs:
           # --windowed evita la console nera su Windows/Mac
           # --onefile produce un singolo binario
           # --name DVSS è il nome finale
-          pyinstaller --noconfirm --clean --windowed --onefile \
-            --name DVSS \
-            --add-data "app_icon.png;." \
-            --add-data "play.png;." \
-            main.py
+          pyinstaller --onefile --windowed --icon=app_icon.ico main.py
+        #   pyinstaller --noconfirm --clean --windowed --onefile \
+        #     --name DVSS \
+        #     --add-data "app_icon.png;." \
+        #     --add-data "play.png;." \
+        #     main.py
       - name: Carica l’artefatto (per il job di release)
         uses: actions/upload-artifact@v4
         with:
